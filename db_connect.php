@@ -1,6 +1,6 @@
 <?php
 // db_connect.php
-
+// KENDİ DB ŞİFRENİ FALAN GİRCEN
 // CONFIGURATION: Fill in your specific database details here
 $host = 'localhost';
 $db_name = 'testdb'; // <--- ENTER DB NAME
@@ -23,4 +23,5 @@ try {
     // In a real production app, log this error instead of echoing it
     die("Connection failed: " . $e->getMessage());
 }
+
 ?>
