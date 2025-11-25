@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Business Portal Login</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Override body background for a professional business look (Deep Blue/Purple) */
+        body {
+            background: linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%) !important;
+        }
+        /* Button style for business */
+        .btn-business {
+            background: linear-gradient(to right, #2c3e50, #4ca1af);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="site-header">BUSINESS PORTAL</div>
+
+    <div class="container">
+        
+        <!-- Message Box -->
+        <div id="message-box"></div>
+
+        <!-- Business Login Form Only -->
+        <div id="business-login-form">
+            <form action="business_login.php" method="POST">
+                <h2>Owner Login</h2>
+                <p style="text-align: center; color: #666; font-size: 0.9rem; margin-bottom: 20px;">
+                    Authorized personnel only.
+                </p>
+
+                <input type="email" name="email" placeholder="Business Email" required />
+                <input type="password" name="password" placeholder="Password" required />
+                
+                <button type="submit" class="btn-business">Access Dashboard</button>
+                
+                <div class="toggle-link" style="margin-top: 25px;">
+                    <a href="index.html" style="text-decoration: none; color: #666;">
+                        &larr; Back to User Login
+                    </a>
+                </div>
+            </form>
+        </div>
+
+    </div>
+
+    <script>
+        // Simple script to handle URL errors for the business page
+        const urlParams = new URLSearchParams(window.location.search);
+        const error = urlParams.get('error');
+        const msgBox = document.getElementById('message-box');
+
+        if (error) {
+            msgBox.style.display = 'block';
+            msgBox.className = 'msg-error';
+            if (error === 'access_denied') msgBox.textContent = "Access Denied: You do not have business privileges.";
+            else if (error === 'invalid_credentials') msgBox.textContent = "Invalid email or password.";
+            else msgBox.textContent = "Login failed.";
+        }
+    </script>
+</body>
+</html>
