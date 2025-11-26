@@ -1,0 +1,179 @@
+-- ==============================
+-- TABLES
+-- ==============================
+
+-- USERS TABLE
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255),
+    password VARCHAR(255),
+    role_type VARCHAR(50),
+    registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    address VARCHAR(255),
+    full_name VARCHAR(255)
+);
+
+-- BUSINESS TABLE
+CREATE TABLE business (
+    shop_id SERIAL PRIMARY KEY,
+    name VARCHAR(255),
+    owner_id INTEGER NOT NULL,
+    address VARCHAR(255),
+    tel_no VARCHAR(50),
+    description TEXT,
+    business_hours TEXT,
+    CONSTRAINT fk_business_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- BUSINESS_HOURS TABLE
+CREATE TABLE business_hours (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER NOT NULL,
+    open_hour TIME,
+    close_hour TIME,
+    day_of_week VARCHAR(20),
+    is_closed BOOLEAN DEFAULT FALSE,
+    created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_hours_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+
+-- CATEGORIES TABLE
+CREATE TABLE categories (
+    id SERIAL PRIMARY KEY,
+    type VARCHAR(100),
+    business_id INTEGER,
+    CONSTRAINT fk_categories_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+
+-- ADDRESS TABLE
+CREATE TABLE address (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER,
+    user_id INTEGER,
+    address VARCHAR(255),
+    city VARCHAR(100),
+    neighbourhood VARCHAR(100),
+    country VARCHAR(100),
+    CONSTRAINT fk_address_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+    CONSTRAINT fk_address_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- REVIEWS TABLE
+CREATE TABLE reviews (
+    review_id SERIAL PRIMARY KEY,
+    comments TEXT,
+    rank INTEGER,
+    user_id INTEGER NOT NULL,
+    business_id INTEGER NOT NULL,
+    photos TEXT,
+    time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_reviews_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_reviews_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+
+-- PHOTOS TABLE
+CREATE TABLE photos (
+    photo_id SERIAL PRIMARY KEY,
+    image_url VARCHAR(255),
+    review_id INTEGER,
+    business_id INTEGER,
+    CONSTRAINT fk_photos_review FOREIGN KEY (review_id) REFERENCES reviews(review_id) ON DELETE CASCADE,
+    CONSTRAINT fk_photos_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+
+-- PRODUCTS TABLE
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER NOT NULL,
+    description TEXT,
+    product_prices DECIMAL,
+    categories VARCHAR(100),
+    available BOOLEAN DEFAULT TRUE,
+    name VARCHAR(255),
+    CONSTRAINT fk_products_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+
+-- PRODUCT_PRICES TABLE
+CREATE TABLE product_prices (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER,
+    price DECIMAL,
+    is_negotiable BOOLEAN DEFAULT FALSE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_product_prices_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+-- FAVORITES TABLE
+CREATE TABLE favorites (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER,
+    user_id INTEGER,
+    CONSTRAINT fk_favorites_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    CONSTRAINT fk_favorites_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- CHATS TABLE
+CREATE TABLE chats (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER,
+    user_id INTEGER,
+    message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chats_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+    CONSTRAINT fk_chats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- MESSAGES TABLE
+CREATE TABLE messages (
+    id SERIAL PRIMARY KEY,
+    content TEXT,
+    user_id INTEGER,
+    owner_id INTEGER,
+    CONSTRAINT fk_messages_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_messages_owner FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- OFFERS TABLE
+CREATE TABLE offers (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER,
+    user_id INTEGER,
+    chat_id INTEGER,
+    offered_price DECIMAL,
+    status VARCHAR(50),
+    created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_offers_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+    CONSTRAINT fk_offers_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_offers_chat FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE
+);
+
+-- REPORTS TABLE
+CREATE TABLE reports (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER,
+    reason TEXT,
+    status VARCHAR(50),
+    report_type VARCHAR(50),
+    CONSTRAINT fk_reports_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- NOTIFICATIONS TABLE
+CREATE TABLE notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER,
+    type VARCHAR(50),
+    content TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- BEST_OF_DAY TABLE
+CREATE TABLE best_of_day (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER,
+    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_best_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+
+

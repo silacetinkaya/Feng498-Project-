@@ -34,6 +34,9 @@
     color: #fff;
     font-size: 1.5rem;
     font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .sidebar-menu {
@@ -42,7 +45,7 @@
 
 .sidebar li {
     width: 100%;
-    margin-bottom: 1.7rem;
+    margin-bottom: 1.3rem; /* Slightly tighter spacing for more items */
     padding-left: 1rem;
 }
 
@@ -50,7 +53,10 @@
     padding-left: 1rem;
     display: block;
     color: #fff;
-    font-size: 1.1rem;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .sidebar a.active {
@@ -75,14 +81,48 @@
     padding: 20px; 
 }
 
+/* HEADER STYLE - FLEXBOX for Status */
 header {
     background: #fff;
     display: flex;
     justify-content: space-between;
+    align-items: center;
     padding: 1rem 1.5rem;
     box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
     border-radius: 10px;
     margin-bottom: 20px;
+}
+
+.header-title h2 {
+    color: #222;
+}
+
+.header-title span {
+    color: var(--text-grey);
+    font-size: 0.9rem;
+}
+
+/* System Status Badge - Small & Right */
+.system-status {
+    background: #e8f5e9;
+    color: #2e7d32;
+    padding: 5px 15px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: 1px solid #c8e6c9;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-dot {
+    height: 8px;
+    width: 8px;
+    background-color: #2ecc71;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.3);
 }
 
 /* Cards */
@@ -96,19 +136,36 @@ header {
 .card-single {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     background: #fff;
     padding: 2rem;
     border-radius: 10px;
     box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.card-single:hover {
+    transform: translateY(-3px);
 }
 
 .card-single h1 {
     color: var(--color-dark);
+    font-size: 2rem;
+}
+
+.card-single span {
+    color: var(--text-grey);
+}
+
+.icon-bg {
+    font-size: 2.5rem;
+    color: var(--main-color);
+    opacity: 0.3;
 }
 
 /* Table */
 .recent-grid {
-    margin-top: 3.5rem;
+    margin-top: 1rem;
 }
 
 .card {
@@ -119,6 +176,19 @@ header {
 .card-header {
     padding: 1rem;
     border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-header button {
+    background: var(--main-color);
+    border-radius: 10px;
+    color: #fff;
+    font-size: .8rem;
+    padding: .5rem 1rem;
+    border: 1px solid var(--main-color);
+    cursor: pointer;
 }
 
 .card-body {

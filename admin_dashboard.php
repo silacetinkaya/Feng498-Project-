@@ -3,21 +3,24 @@
 session_start();
 require_once 'db_connect.php';
 
-// 1. SECURITY: Enforce Admin Access
+// Security Check
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     header("Location: admin.html?error=access_denied");
     exit;
 }
 
-// 2. DATA FETCHING: Get stats and user list
 try {
-    // Count total users
-    $countStmt = $pdo->query("SELECT COUNT(*) FROM users");
-    $totalUsers = $countStmt->fetchColumn();
+    $userCountStmt = $pdo->query("SELECT COUNT(*) FROM users");
+    $totalUsers = $userCountStmt->fetchColumn();
 
-    // Fetch all users ordered by ID
-    $stmt = $pdo->query("SELECT * FROM users ORDER BY id ASC");
-    $users = $stmt->fetchAll();
+    $bizCountStmt = $pdo->query("SELECT COUNT(*) FROM business");
+    $totalBusiness = $bizCountStmt->fetchColumn();
+
+    $reportCountStmt = $pdo->query("SELECT COUNT(*) FROM reports");
+    $totalReports = $reportCountStmt->fetchColumn();
+
+    $stmt = $pdo->query("SELECT * FROM users ORDER BY id DESC LIMIT 5");
+    $recentUsers = $stmt->fetchAll();
 
 } catch (PDOException $e) {
     die("Database Error: " . $e->getMessage());
@@ -31,63 +34,64 @@ try {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard</title>
     <link rel="stylesheet" href="admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
 
     <!-- SIDEBAR -->
     <div class="sidebar">
-        <div class="logo">AdminPanel</div>
+        <div class="logo">
+            <i class="fas fa-shield-alt"></i> AdminPanel
+        </div>
         <ul class="nav-links">
-            <li><a href="#" class="active">Dashboard</a></li>
-            <li><a href="#">User Management</a></li>
-            <li><a href="#">System Settings</a></li>
-            <li><a href="#">Reports</a></li>
+            <li><a href="admin_dashboard.php" class="active"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
+            <li><a href="user_management.php"><i class="fas fa-users"></i> User Management</a></li>
+            <li><a href="user_management.php?tab=business"><i class="fas fa-briefcase"></i> Businesses</a></li>
+            <!-- FIXED LINK BELOW -->
+            <li><a href="review_management.php"><i class="fas fa-star"></i> Reviews</a></li>
+            <li><a href="report_management.php"><i class="fas fa-flag"></i> Reports</a></li>
+            <li><a href="#"><i class="fas fa-trophy"></i> Best of Day</a></li>
         </ul>
         <div class="logout-section">
-            <!-- Simple logout just destroys session (create logout.php if needed) -->
-            <a href="index.html" onclick="<?php session_destroy(); ?>">Logout</a>
+            <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
         </div>
     </div>
 
     <!-- MAIN CONTENT -->
     <div class="main-content">
         
-        <!-- Top Bar -->
         <header>
-            <h2>Overview</h2>
-            <div class="user-wrapper">
-                <span>Welcome, <b><?php echo htmlspecialchars($_SESSION['admin_name']); ?></b></span>
+            <div class="header-title">
+                <h2>Overview</h2>
+                <span>Welcome, <?php echo htmlspecialchars($_SESSION['admin_name']); ?></span>
+            </div>
+            <div class="system-status">
+                <span class="status-dot"></span>
+                System Operational
             </div>
         </header>
 
-        <!-- Stats Cards -->
         <div class="cards">
             <div class="card-single">
-                <div>
-                    <h1><?php echo $totalUsers; ?></h1>
-                    <span>Total Users</span>
-                </div>
+                <div><h1><?php echo $totalUsers; ?></h1><span>Total Users</span></div>
+                <div><i class="fas fa-users icon-bg"></i></div>
             </div>
             <div class="card-single">
-                <div>
-                    <h1>Active</h1>
-                    <span>System Status</span>
-                </div>
+                <div><h1><?php echo $totalBusiness; ?></h1><span>Businesses</span></div>
+                <div><i class="fas fa-store icon-bg"></i></div>
             </div>
             <div class="card-single">
-                <div>
-                    <h1>0</h1>
-                    <span>Pending Issues</span>
-                </div>
+                <div><h1><?php echo $totalReports; ?></h1><span>Active Reports</span></div>
+                <div><i class="fas fa-exclamation-circle icon-bg"></i></div>
             </div>
         </div>
 
-        <!-- Recent Grid -->
         <div class="recent-grid">
             <div class="projects">
                 <div class="card">
                     <div class="card-header">
-                        <h3>User Management</h3>
+                        <h3>Newest Users</h3>
+                        <a href="user_management.php"><button>Manage Users <i class="fas fa-arrow-right"></i></button></a>
                     </div>
                     <div class="card-body">
                         <table width="100%">
@@ -98,11 +102,10 @@ try {
                                     <td>Email</td>
                                     <td>Role</td>
                                     <td>Date</td>
-                                    <td>Action</td>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($users as $user): ?>
+                                <?php foreach ($recentUsers as $user): ?>
                                 <tr>
                                     <td>#<?php echo $user['id']; ?></td>
                                     <td><?php echo htmlspecialchars($user['full_name']); ?></td>
@@ -113,18 +116,6 @@ try {
                                         </span>
                                     </td>
                                     <td><?php echo date('M d, Y', strtotime($user['registration_date'])); ?></td>
-                                    <td>
-                                        <!-- Delete Button (Prevent deleting self) -->
-                                        <?php if ($user['id'] != $_SESSION['user_id']): ?>
-                                            <a href="delete_user.php?id=<?php echo $user['id']; ?>" 
-                                               class="btn-delete"
-                                               onclick="return confirm('Are you sure you want to delete this user?');">
-                                               Delete
-                                            </a>
-                                        <?php else: ?>
-                                            <span style="color:#ccc;">(You)</span>
-                                        <?php endif; ?>
-                                    </td>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
