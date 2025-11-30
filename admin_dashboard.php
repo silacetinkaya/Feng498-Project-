@@ -3,7 +3,6 @@
 session_start();
 require_once 'db_connect.php';
 
-// Security Check
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     header("Location: admin.html?error=access_denied");
     exit;
@@ -46,8 +45,8 @@ try {
         <ul class="nav-links">
             <li><a href="admin_dashboard.php" class="active"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
             <li><a href="user_management.php"><i class="fas fa-users"></i> User Management</a></li>
+            <li><a href="category_management.php"><i class="fas fa-tags"></i> Categories</a></li>
             <li><a href="user_management.php?tab=business"><i class="fas fa-briefcase"></i> Businesses</a></li>
-            <!-- FIXED LINK BELOW -->
             <li><a href="review_management.php"><i class="fas fa-star"></i> Reviews</a></li>
             <li><a href="report_management.php"><i class="fas fa-flag"></i> Reports</a></li>
             <li><a href="#"><i class="fas fa-trophy"></i> Best of Day</a></li>

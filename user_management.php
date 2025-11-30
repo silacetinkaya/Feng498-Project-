@@ -43,7 +43,6 @@ $businesses = $stmtBiz->fetchAll();
     <link rel="stylesheet" href="admin.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        /* Specific Styles for Management Page */
         .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
         .search-box { display: flex; gap: 10px; }
         .search-box input, .search-box select { padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
@@ -67,13 +66,14 @@ $businesses = $stmtBiz->fetchAll();
 </head>
 <body>
 
+<!-- SIDEBAR (Fixed: No missing links) -->
 <div class="sidebar">
     <div class="logo"><i class="fas fa-shield-alt"></i> AdminPanel</div>
     <ul class="nav-links">
         <li><a href="admin_dashboard.php"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
         <li><a href="user_management.php" class="<?php echo $tab=='users'?'active':''; ?>"><i class="fas fa-users"></i> User Management</a></li>
+        <li><a href="category_management.php"><i class="fas fa-tags"></i> Categories</a></li>
         <li><a href="user_management.php?tab=business" class="<?php echo $tab=='business'?'active':''; ?>"><i class="fas fa-briefcase"></i> Businesses</a></li>
-        <!-- FIXED LINK BELOW -->
         <li><a href="review_management.php"><i class="fas fa-star"></i> Reviews</a></li>
         <li><a href="report_management.php"><i class="fas fa-flag"></i> Reports</a></li>
         <li><a href="#"><i class="fas fa-trophy"></i> Best of Day</a></li>
@@ -202,29 +202,17 @@ $businesses = $stmtBiz->fetchAll();
 
 </div>
 
-<!-- CREATE USER MODAL -->
+<!-- MODALS -->
 <div id="createUserModal" class="modal">
     <div class="modal-content">
         <span class="close" onclick="document.getElementById('createUserModal').style.display='none'">&times;</span>
         <h2>Create New User</h2>
         <form action="admin_process.php" method="POST">
             <input type="hidden" name="action" value="create_user">
-            <div class="form-group">
-                <label>Full Name</label>
-                <input type="text" name="full_name" required>
-            </div>
-            <div class="form-group">
-                <label>Email</label>
-                <input type="email" name="email" required>
-            </div>
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" name="password" required>
-            </div>
-            <div class="form-group">
-                <label>Address</label>
-                <input type="text" name="address">
-            </div>
+            <div class="form-group"><label>Full Name</label><input type="text" name="full_name" required></div>
+            <div class="form-group"><label>Email</label><input type="email" name="email" required></div>
+            <div class="form-group"><label>Password</label><input type="password" name="password" required></div>
+            <div class="form-group"><label>Address</label><input type="text" name="address"></div>
             <div class="form-group">
                 <label>Role</label>
                 <select name="role_type">
@@ -237,30 +225,16 @@ $businesses = $stmtBiz->fetchAll();
     </div>
 </div>
 
-<!-- CREATE BUSINESS MODAL -->
 <div id="createBusinessModal" class="modal">
     <div class="modal-content">
         <span class="close" onclick="document.getElementById('createBusinessModal').style.display='none'">&times;</span>
         <h2>Create Business</h2>
         <form action="admin_process.php" method="POST">
             <input type="hidden" name="action" value="create_business">
-            <div class="form-group">
-                <label>Business Name</label>
-                <input type="text" name="name" required>
-            </div>
-            <div class="form-group">
-                <label>Owner ID (User ID)</label>
-                <input type="number" name="owner_id" placeholder="Enter User ID of Owner" required>
-                <small>Check User List for ID</small>
-            </div>
-            <div class="form-group">
-                <label>Address</label>
-                <input type="text" name="address">
-            </div>
-             <div class="form-group">
-                <label>Phone</label>
-                <input type="text" name="tel_no">
-            </div>
+            <div class="form-group"><label>Business Name</label><input type="text" name="name" required></div>
+            <div class="form-group"><label>Owner ID (User ID)</label><input type="number" name="owner_id" required><small>Check User List</small></div>
+            <div class="form-group"><label>Address</label><input type="text" name="address"></div>
+            <div class="form-group"><label>Phone</label><input type="text" name="tel_no"></div>
             <button type="submit" class="btn-action btn-create" style="width:100%">Create Business</button>
         </form>
     </div>

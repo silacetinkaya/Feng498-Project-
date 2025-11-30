@@ -176,4 +176,18 @@ CREATE TABLE best_of_day (
     CONSTRAINT fk_best_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
 );
 
+-- 1. Add product_id to the existing PHOTOS table
+ALTER TABLE photos ADD COLUMN product_id INTEGER;
+ALTER TABLE photos ADD CONSTRAINT fk_photos_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE;
 
+-- 2. Ensure CATEGORIES table has unique types to avoid duplicates
+ALTER TABLE categories ADD CONSTRAINT unique_category_type UNIQUE (type);
+
+-- 3. Insert default Admin Categories (if not already there)
+INSERT INTO categories (type, business_id) VALUES 
+('Electronics', NULL),
+('Food & Beverage', NULL),
+('Clothing', NULL),
+('Home & Garden', NULL),
+('Services', NULL)
+ON CONFLICT (type) DO NOTHING;

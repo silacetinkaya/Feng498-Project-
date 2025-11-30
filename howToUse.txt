@@ -1,0 +1,4 @@
+1-db_connect.php fileında dbname password ve username kendine göre değiştir
+2-db.txt değişiklikler var onları sql script olarak çalıştır 
+3-create_admin.php çalıştır 1 kez ve tek seferlik admin oluştur şifre admi123 email admiadmin@example.com
+4-generate_data.php çalıştır 1 kez mock data oluştur

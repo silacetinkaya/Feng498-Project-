@@ -8,14 +8,17 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
-// --- FILTER & SEARCH LOGIC ---
 $search = $_GET['search'] ?? '';
 $rankFilter = $_GET['rank'] ?? 'all';
 
-$sql = "SELECT r.*, u.full_name as user_name, b.name as business_name 
+// Fetch Reviews with Photo URLs (Using string_agg for Postgres to comma separate them)
+// Postgres uses string_agg, MySQL uses GROUP_CONCAT
+$sql = "SELECT r.*, u.full_name as user_name, b.name as business_name,
+        string_agg(p.image_url, ',') as photo_urls
         FROM reviews r 
         LEFT JOIN users u ON r.user_id = u.id 
         LEFT JOIN business b ON r.business_id = b.shop_id 
+        LEFT JOIN photos p ON r.review_id = p.review_id
         WHERE (b.name ILIKE :search OR u.full_name ILIKE :search OR r.comments ILIKE :search)";
 
 $params = [':search' => "%$search%"];
@@ -25,7 +28,7 @@ if ($rankFilter !== 'all') {
     $params[':rank'] = $rankFilter;
 }
 
-$sql .= " ORDER BY r.time DESC";
+$sql .= " GROUP BY r.review_id, u.full_name, b.name ORDER BY r.time DESC";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
@@ -50,10 +53,11 @@ $reviews = $stmt->fetchAll();
         .btn-delete { background: #e74c3c; }
 
         .star-rating { color: #f1c40f; }
+        .review-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; margin-right: 2px; border: 1px solid #ddd; }
         
         /* Modal Styles */
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); }
-        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 500px; border-radius: 10px; }
+        .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 500px; border-radius: 10px; }
         .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
         .close:hover { color: black; }
         .form-group { margin-bottom: 15px; }
@@ -68,18 +72,16 @@ $reviews = $stmt->fetchAll();
     <ul class="nav-links">
         <li><a href="admin_dashboard.php"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
         <li><a href="user_management.php"><i class="fas fa-users"></i> User Management</a></li>
+        <li><a href="category_management.php"><i class="fas fa-tags"></i> Categories</a></li>
         <li><a href="user_management.php?tab=business"><i class="fas fa-briefcase"></i> Businesses</a></li>
         <li><a href="review_management.php" class="active"><i class="fas fa-star"></i> Reviews</a></li>
         <li><a href="report_management.php"><i class="fas fa-flag"></i> Reports</a></li>
         <li><a href="#"><i class="fas fa-trophy"></i> Best of Day</a></li>
     </ul>
-    <div class="logout-section">
-        <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
-    </div>
+    <div class="logout-section"><a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a></div>
 </div>
 
 <div class="main-content">
-    
     <header>
         <h2>Review Management</h2>
         <div class="system-status"><span class="status-dot"></span>System Operational</div>
@@ -113,7 +115,7 @@ $reviews = $stmt->fetchAll();
                         <td>User</td>
                         <td>Rating</td>
                         <td>Comment</td>
-                        <td>Date</td>
+                        <td>Photos</td>
                         <td>Actions</td>
                     </tr>
                 </thead>
@@ -130,7 +132,18 @@ $reviews = $stmt->fetchAll();
                             </span>
                         </td>
                         <td><?php echo htmlspecialchars(substr($r['comments'], 0, 40)) . (strlen($r['comments'])>40?'...':''); ?></td>
-                        <td><?php echo date('M d, Y', strtotime($r['time'])); ?></td>
+                        <td>
+                            <?php 
+                            if($r['photo_urls']) {
+                                $photos = explode(',', $r['photo_urls']);
+                                foreach($photos as $p) {
+                                    echo '<img src="'.htmlspecialchars($p).'" class="review-thumb">';
+                                }
+                            } else {
+                                echo '<span style="color:#ccc; font-size:0.8rem;">No photos</span>';
+                            }
+                            ?>
+                        </td>
                         <td>
                             <a href="edit_review.php?id=<?php echo $r['review_id']; ?>" class="btn-action btn-edit"><i class="fas fa-edit"></i></a>
                             
@@ -149,12 +162,12 @@ $reviews = $stmt->fetchAll();
 
 </div>
 
-<!-- CREATE REVIEW MODAL -->
+<!-- CREATE REVIEW MODAL WITH PHOTOS -->
 <div id="createReviewModal" class="modal">
     <div class="modal-content">
         <span class="close" onclick="document.getElementById('createReviewModal').style.display='none'">&times;</span>
         <h2>Add Manual Review</h2>
-        <form action="admin_process.php" method="POST">
+        <form action="admin_process.php" method="POST" enctype="multipart/form-data">
             <input type="hidden" name="action" value="create_review">
             
             <div class="form-group">
@@ -180,7 +193,13 @@ $reviews = $stmt->fetchAll();
             
             <div class="form-group">
                 <label>Comment</label>
-                <textarea name="comments" rows="4" required></textarea>
+                <textarea name="comments" rows="3" required></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>Photos (Max 4)</label>
+                <input type="file" name="review_images[]" multiple accept="image/*">
+                <small style="color:#666;">Hold Ctrl/Cmd to select multiple images.</small>
             </div>
 
             <button type="submit" class="btn-action btn-create" style="width:100%">Submit Review</button>
