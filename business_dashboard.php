@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['upload_pricelist'])) {
         try {
             if (isset($_FILES['pl_image']) && $_FILES['pl_image']['error'] === UPLOAD_ERR_OK) {
-                $uploadDir = 'uploads/';
+                $uploadDir = 'uploads/pricelists/';
                 if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
 
                 $ext = strtolower(pathinfo($_FILES['pl_image']['name'], PATHINFO_EXTENSION));
@@ -128,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Save image
             if (isset($_FILES['p_image']) && $_FILES['p_image']['error'] === UPLOAD_ERR_OK) {
-                $uploadDir = 'uploads/';
+                $uploadDir = 'uploads/products/';
                 if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
                 
                 $ext = strtolower(pathinfo($_FILES['p_image']['name'], PATHINFO_EXTENSION));
