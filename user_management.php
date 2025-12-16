@@ -8,31 +8,78 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
-// --- FILTER & SEARCH LOGIC ---
+// --- PAGINATION & FILTER LOGIC ---
 $search = $_GET['search'] ?? '';
 $roleFilter = $_GET['role'] ?? 'all';
-$tab = $_GET['tab'] ?? 'users'; // 'users' or 'business'
+$tab = $_GET['tab'] ?? 'users'; 
 
-// Users Query
-$userQuery = "SELECT * FROM users WHERE (full_name ILIKE :search OR email ILIKE :search)";
-$userParams = [':search' => "%$search%"];
+// Pagination Variables
+$page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+$limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 20; // Default 20
+if ($page < 1) $page = 1;
+if ($limit < 1) $limit = 20;
+$offset = ($page - 1) * $limit;
 
-if ($roleFilter !== 'all') {
-    $userQuery .= " AND role_type = :role";
-    $userParams[':role'] = $roleFilter;
+// --- DATA FETCHING ---
+$users = [];
+$businesses = [];
+$totalPages = 1;
+
+if ($tab == 'users') {
+    // 1. Get Total Count for Users
+    $countSql = "SELECT COUNT(*) FROM users WHERE (full_name ILIKE :search OR email ILIKE :search)";
+    $countParams = [':search' => "%$search%"];
+    if ($roleFilter !== 'all') {
+        $countSql .= " AND role_type = :role";
+        $countParams[':role'] = $roleFilter;
+    }
+    $stmtCount = $pdo->prepare($countSql);
+    $stmtCount->execute($countParams);
+    $totalRecords = $stmtCount->fetchColumn();
+    $totalPages = ceil($totalRecords / $limit);
+
+    // 2. Fetch Data with Limit/Offset
+    $userQuery = "SELECT * FROM users WHERE (full_name ILIKE :search OR email ILIKE :search)";
+    if ($roleFilter !== 'all') {
+        $userQuery .= " AND role_type = :role";
+    }
+    $userQuery .= " ORDER BY id DESC LIMIT :limit OFFSET :offset";
+    
+    $stmtUsers = $pdo->prepare($userQuery);
+    $stmtUsers->bindValue(':search', "%$search%");
+    if ($roleFilter !== 'all') $stmtUsers->bindValue(':role', $roleFilter);
+    $stmtUsers->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmtUsers->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmtUsers->execute();
+    $users = $stmtUsers->fetchAll();
+
+} elseif ($tab == 'business') {
+    // 1. Get Total Count for Business
+    $countSql = "SELECT COUNT(*) FROM business b WHERE b.name ILIKE :search";
+    $stmtCount = $pdo->prepare($countSql);
+    $stmtCount->execute([':search' => "%$search%"]);
+    $totalRecords = $stmtCount->fetchColumn();
+    $totalPages = ceil($totalRecords / $limit);
+
+    // 2. Fetch Data with Limit/Offset
+    $bizQuery = "SELECT b.*, u.full_name as owner_name FROM business b 
+                 LEFT JOIN users u ON b.owner_id = u.id 
+                 WHERE b.name ILIKE :search
+                 ORDER BY b.shop_id DESC LIMIT :limit OFFSET :offset";
+    
+    $stmtBiz = $pdo->prepare($bizQuery);
+    $stmtBiz->bindValue(':search', "%$search%");
+    $stmtBiz->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmtBiz->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmtBiz->execute();
+    $businesses = $stmtBiz->fetchAll();
 }
-$userQuery .= " ORDER BY id DESC";
-$stmtUsers = $pdo->prepare($userQuery);
-$stmtUsers->execute($userParams);
-$users = $stmtUsers->fetchAll();
 
-// Business Query
-$bizQuery = "SELECT b.*, u.full_name as owner_name FROM business b 
-             LEFT JOIN users u ON b.owner_id = u.id 
-             WHERE b.name ILIKE :search";
-$stmtBiz = $pdo->prepare($bizQuery);
-$stmtBiz->execute([':search' => "%$search%"]);
-$businesses = $stmtBiz->fetchAll();
+// Helper to build pagination links keeping current filters
+function getLink($page, $currentLimit) {
+    global $search, $roleFilter, $tab;
+    return "?tab=$tab&search=$search&role=$roleFilter&limit=$currentLimit&page=$page";
+}
 ?>
 
 <!DOCTYPE html>
@@ -51,6 +98,11 @@ $businesses = $stmtBiz->fetchAll();
         .btn-edit { background: #3498db; text-decoration: none; display:inline-block;}
         .btn-delete { background: #e74c3c; text-decoration: none; display:inline-block;}
         
+        .pagination { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
+        .pagination a { padding: 8px 12px; border: 1px solid #ddd; background: white; text-decoration: none; color: #333; border-radius: 4px; }
+        .pagination a.active { background: #d32f2f; color: white; border-color: #d32f2f; }
+        .pagination a:hover:not(.active) { background: #eee; }
+
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); }
         .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 400px; border-radius: 10px; }
         .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
@@ -66,7 +118,6 @@ $businesses = $stmtBiz->fetchAll();
 </head>
 <body>
 
-<!-- SIDEBAR (Fixed: No missing links) -->
 <div class="sidebar">
     <div class="logo"><i class="fas fa-shield-alt"></i> AdminPanel</div>
     <ul class="nav-links">
@@ -92,8 +143,8 @@ $businesses = $stmtBiz->fetchAll();
 
     <!-- TABS -->
     <div class="tabs">
-        <button class="tab-btn <?php echo $tab=='users'?'active':''; ?>" onclick="window.location.href='?tab=users'">Users & Admins</button>
-        <button class="tab-btn <?php echo $tab=='business'?'active':''; ?>" onclick="window.location.href='?tab=business'">Businesses</button>
+        <button class="tab-btn <?php echo $tab=='users'?'active':''; ?>" onclick="window.location.href='?tab=users&limit=<?php echo $limit; ?>'">Users & Admins</button>
+        <button class="tab-btn <?php echo $tab=='business'?'active':''; ?>" onclick="window.location.href='?tab=business&limit=<?php echo $limit; ?>'">Businesses</button>
     </div>
 
     <!-- USERS TAB -->
@@ -101,6 +152,14 @@ $businesses = $stmtBiz->fetchAll();
     <div class="controls">
         <form class="search-box" method="GET">
             <input type="hidden" name="tab" value="users">
+            
+            <!-- Rows Per Page -->
+            <select name="limit" onchange="this.form.submit()" style="width:80px;">
+                <option value="20" <?php echo $limit==20?'selected':''; ?>>20</option>
+                <option value="50" <?php echo $limit==50?'selected':''; ?>>50</option>
+                <option value="100" <?php echo $limit==100?'selected':''; ?>>100</option>
+            </select>
+
             <input type="text" name="search" placeholder="Search Name/Email..." value="<?php echo htmlspecialchars($search); ?>">
             <select name="role">
                 <option value="all">All Roles</option>
@@ -138,7 +197,7 @@ $businesses = $stmtBiz->fetchAll();
                             <?php if ($user['id'] != $_SESSION['user_id']): ?>
                                 <a href="admin_process.php?action=delete_user&id=<?php echo $user['id']; ?>" 
                                    class="btn-action btn-delete"
-                                   onclick="return confirm('Delete this user? This cannot be undone.');">
+                                   onclick="return confirm('Delete this user?');">
                                    <i class="fas fa-trash"></i>
                                 </a>
                             <?php endif; ?>
@@ -147,6 +206,23 @@ $businesses = $stmtBiz->fetchAll();
                     <?php endforeach; ?>
                 </tbody>
             </table>
+
+            <!-- PAGINATION USERS -->
+            <?php if ($totalPages > 1): ?>
+            <div class="pagination">
+                <?php if($page > 1): ?>
+                    <a href="<?php echo getLink($page-1, $limit); ?>">&laquo; Prev</a>
+                <?php endif; ?>
+                
+                <?php for($i=1; $i<=$totalPages; $i++): ?>
+                    <a href="<?php echo getLink($i, $limit); ?>" class="<?php echo $page==$i?'active':''; ?>"><?php echo $i; ?></a>
+                <?php endfor; ?>
+                
+                <?php if($page < $totalPages): ?>
+                    <a href="<?php echo getLink($page+1, $limit); ?>">Next &raquo;</a>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
     <?php endif; ?>
@@ -156,6 +232,14 @@ $businesses = $stmtBiz->fetchAll();
     <div class="controls">
         <form class="search-box" method="GET">
             <input type="hidden" name="tab" value="business">
+            
+             <!-- Rows Per Page -->
+            <select name="limit" onchange="this.form.submit()" style="width:80px;">
+                <option value="20" <?php echo $limit==20?'selected':''; ?>>20</option>
+                <option value="50" <?php echo $limit==50?'selected':''; ?>>50</option>
+                <option value="100" <?php echo $limit==100?'selected':''; ?>>100</option>
+            </select>
+
             <input type="text" name="search" placeholder="Search Business Name..." value="<?php echo htmlspecialchars($search); ?>">
             <button type="submit" class="btn-action btn-edit">Search</button>
         </form>
@@ -185,7 +269,6 @@ $businesses = $stmtBiz->fetchAll();
                         <td><?php echo htmlspecialchars($biz['tel_no']); ?></td>
                         <td>
                              <a href="edit_business.php?id=<?php echo $biz['shop_id']; ?>" class="btn-action btn-edit"><i class="fas fa-edit"></i></a>
-                             
                              <a href="admin_process.php?action=delete_business&id=<?php echo $biz['shop_id']; ?>" 
                                class="btn-action btn-delete"
                                onclick="return confirm('Delete this business?');">
@@ -196,12 +279,34 @@ $businesses = $stmtBiz->fetchAll();
                     <?php endforeach; ?>
                 </tbody>
             </table>
+
+            <!-- PAGINATION BUSINESS -->
+            <?php if ($totalPages > 1): ?>
+            <div class="pagination">
+                <?php if($page > 1): ?>
+                    <a href="<?php echo getLink($page-1, $limit); ?>">&laquo; Prev</a>
+                <?php endif; ?>
+                
+                <?php for($i=1; $i<=$totalPages; $i++): ?>
+                    <a href="<?php echo getLink($i, $limit); ?>" class="<?php echo $page==$i?'active':''; ?>"><?php echo $i; ?></a>
+                <?php endfor; ?>
+                
+                <?php if($page < $totalPages): ?>
+                    <a href="<?php echo getLink($page+1, $limit); ?>">Next &raquo;</a>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
     <?php endif; ?>
 
 </div>
 
+<!-- Include existing modals here (create user/business) - keeping them hidden for brevity -->
+<!-- Keep previous modal code here -->
+
+</body>
+</html>
 <!-- MODALS -->
 <div id="createUserModal" class="modal">
     <div class="modal-content">

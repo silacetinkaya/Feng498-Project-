@@ -183,11 +183,26 @@ ALTER TABLE photos ADD CONSTRAINT fk_photos_product FOREIGN KEY (product_id) REF
 -- 2. Ensure CATEGORIES table has unique types to avoid duplicates
 ALTER TABLE categories ADD CONSTRAINT unique_category_type UNIQUE (type);
 
--- 3. Insert default Admin Categories (if not already there)
-INSERT INTO categories (type, business_id) VALUES 
-('Electronics', NULL),
-('Food & Beverage', NULL),
-('Clothing', NULL),
-('Home & Garden', NULL),
-('Services', NULL)
-ON CONFLICT (type) DO NOTHING;
+-- Table to store Business Responses
+CREATE TABLE review_responses (
+    id SERIAL PRIMARY KEY,
+    review_id INTEGER NOT NULL UNIQUE, -- Only 1 response per review
+    business_id INTEGER NOT NULL,
+    response_text TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT fk_response_review FOREIGN KEY (review_id) REFERENCES reviews(review_id) ON DELETE CASCADE,
+    CONSTRAINT fk_response_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+ALTER TABLE reviews ADD COLUMN is_approved BOOLEAN DEFAULT FALSE;
+ALTER TABLE review_responses ADD COLUMN is_approved BOOLEAN DEFAULT FALSE;
+
+-- 2. Create Price List Table
+CREATE TABLE price_lists (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER NOT NULL,
+    image_url VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pricelist_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);

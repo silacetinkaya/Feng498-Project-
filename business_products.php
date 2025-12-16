@@ -5,13 +5,10 @@
     <div class="card-body">
         <form method="POST" enctype="multipart/form-data" style="display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
             <input type="hidden" name="add_product" value="1">
-            
             <div style="flex:1; min-width:200px;">
-                <label>Product Name</label><br>
+                <label>Name</label><br>
                 <input type="text" name="p_name" required style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px;">
             </div>
-
-            <!-- DYNAMIC CATEGORIES -->
             <div style="flex:1; min-width:150px;">
                 <label>Category</label><br>
                 <select name="p_category" required style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; background:white;">
@@ -21,28 +18,22 @@
                     <?php endforeach; ?>
                 </select>
             </div>
-
             <div style="flex:0 0 120px;">
                 <label>Price</label><br>
                 <input type="number" step="0.01" name="p_price" required style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px;">
             </div>
-
-            <!-- IMAGE -->
             <div style="flex:1; min-width:200px;">
                 <label>Photo</label><br>
                 <input type="file" name="p_image" accept="image/*" style="width:100%; padding:5px; border:1px solid #ddd; background:#f9f9f9; border-radius:4px;">
             </div>
-
             <div style="flex:2; min-width:300px;">
                 <label>Description</label><br>
                 <input type="text" name="p_description" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px;">
             </div>
-
             <div style="width:100%; display:flex; gap:10px; align-items:center; margin-top:5px;">
                 <input type="checkbox" id="neg" name="p_negotiable"> 
                 <label for="neg" style="margin:0; font-weight:normal;">Price is Negotiable</label>
             </div>
-            
             <button type="submit" style="background:#3498db; color:white; padding:10px 15px; border:none; border-radius:4px; height:36px; cursor:pointer; margin-top:10px;">
                 <i class="fas fa-plus"></i> Add
             </button>
@@ -52,7 +43,7 @@
 
 <div class="card">
     <div class="card-header">
-        <h3>Product Catalog</h3>
+        <h3>Product Catalog (Page <?php echo $prodPage; ?> of <?php echo $totalProdPages ?: 1; ?>)</h3>
     </div>
     <div class="card-body">
         <table width="100%">
@@ -61,7 +52,7 @@
                     <td>Image</td>
                     <td>Details</td>
                     <td>Category</td>
-                    <td>Pricing (Latest)</td>
+                    <td>Pricing</td>
                     <td>Action</td>
                 </tr>
             </thead>
@@ -84,14 +75,9 @@
                         </td>
                         <td><span style="background:#eee; padding:3px 8px; border-radius:10px; font-size:0.8rem;"><?php echo htmlspecialchars($p['categories']); ?></span></td>
                         <td>
-                            <form method="POST" style="display:flex; align-items:center; gap:5px;">
-                                <input type="hidden" name="update_price" value="1">
-                                <input type="hidden" name="product_id" value="<?php echo $p['id']; ?>">
-                                <input type="number" step="0.01" name="new_price" value="<?php echo $p['product_prices']; ?>" style="width:70px; padding:4px; border:1px solid #ddd; border-radius:4px;">
-                                <button type="submit" style="background:#2ecc71; color:white; border:none; padding:5px; border-radius:3px; cursor:pointer;"><i class="fas fa-check"></i></button>
-                            </form>
+                            <?php echo htmlspecialchars($p['product_prices']); ?>
                             <?php if($p['is_negotiable'] === true || $p['is_negotiable'] === 't'): ?>
-                                <small style="color:orange;"><i class="fas fa-handshake"></i> Negotiable</small>
+                                <small style="color:orange; display:block;"><i class="fas fa-handshake"></i> Negotiable</small>
                             <?php endif; ?>
                         </td>
                         <td>
@@ -106,5 +92,26 @@
                 <?php endif; ?>
             </tbody>
         </table>
+
+        <!-- PAGINATION UI -->
+        <?php if ($totalProdPages > 1): ?>
+        <div class="pagination">
+            <?php 
+            // Previous Link
+            if($prodPage > 1) {
+                echo '<a href="?tab=products&prod_page='.($prodPage-1).'">&laquo; Prev</a>';
+            }
+            // Page Numbers
+            for($i = 1; $i <= $totalProdPages; $i++) {
+                $active = ($prodPage == $i) ? 'active' : '';
+                echo '<a href="?tab=products&prod_page='.$i.'" class="'.$active.'">'.$i.'</a>';
+            }
+            // Next Link
+            if($prodPage < $totalProdPages) {
+                echo '<a href="?tab=products&prod_page='.($prodPage+1).'">Next &raquo;</a>';
+            }
+            ?>
+        </div>
+        <?php endif; ?>
     </div>
 </div>

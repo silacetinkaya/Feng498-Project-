@@ -283,6 +283,39 @@ try {
         $stmt->execute([$_GET['id']]);
         header("Location: report_management.php?msg=deleted");
     }
+     // --- APPROVE REVIEW ---
+    elseif ($action === 'approve_review') {
+        $id = $_GET['id'];
+        $stmt = $pdo->prepare("UPDATE reviews SET is_approved = TRUE WHERE review_id = ?");
+        $stmt->execute([$id]);
+        header("Location: review_management.php?msg=approved");
+    }
+
+    // --- APPROVE RESPONSE ---
+    elseif ($action === 'approve_response') {
+        // We accept the review_id to find the response, or pass response ID directly. 
+        // Let's assume we pass the review_id to find the attached response
+        $id = $_GET['review_id'];
+        $stmt = $pdo->prepare("UPDATE review_responses SET is_approved = TRUE WHERE review_id = ?");
+        $stmt->execute([$id]);
+        header("Location: review_management.php?msg=resp_approved");
+    }
+
+    // --- DELETE REVIEW ---
+    elseif ($action === 'delete_review') {
+        $id = $_GET['id'];
+        $stmt = $pdo->prepare("DELETE FROM reviews WHERE review_id = ?");
+        $stmt->execute([$id]);
+        header("Location: review_management.php?msg=deleted");
+    }
+
+    // --- DELETE RESPONSE ONLY ---
+    elseif ($action === 'delete_response') {
+        $id = $_GET['review_id'];
+        $stmt = $pdo->prepare("DELETE FROM review_responses WHERE review_id = ?");
+        $stmt->execute([$id]);
+        header("Location: review_management.php?msg=resp_deleted");
+    }
 
 } catch (PDOException $e) {
     die("Database Error: " . $e->getMessage());

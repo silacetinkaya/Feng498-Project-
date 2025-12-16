@@ -2,3 +2,20 @@
 2-db.txt değişiklikler var onları sql script olarak çalıştır 
 3-create_admin.php çalıştır 1 kez ve tek seferlik admin oluştur şifre admi123 email admiadmin@example.com
 4-generate_data.php çalıştır 1 kez mock data oluştur
+
+kategoriler
+1-Repair
+2-Hair Dresser
+3-Grocery
+4-Restaurant
+5-Cafe
+6-Kiosk
+7-Nail Bar
+8-Pub
+9-Club
+10-Bakery
+11-Flower Shop
+12-Pet-Shop
+13-Gym
+14-Tattoo
+15-
