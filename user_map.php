@@ -32,35 +32,37 @@ $businesses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <style>
         html, body {
-            margin: 0;
-            height: 100%;
-            font-family: system-ui;
+          margin: 0;
+          padding: 0;
+          height: 100%;
         }
 
         .page {
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-        }
+          display: flex;
+          flex-direction: column;
+         height: 100vh; /* tam ekran */
+         }
 
         .topbar {
-            padding: 10px 16px;
-            background: #e53935;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+          height: 60px;
+         flex-shrink: 0;
+          z-index: 10;
+         position: relative;
         }
 
         #map {
-            flex: 1;
+         flex: 1;
+          width: 100%;
+          height: calc(100vh - 60px);
+         position: relative;
+         z-index: 1;
         }
 
-        .topbar input, .topbar select {
-            padding: 6px 10px;
-            border-radius: 999px;
-            border: none;
+        .leaflet-container {
+         z-index: 1 !important;
         }
+
+        
     </style>
 </head>
 <body>
@@ -102,7 +104,7 @@ $businesses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-// PHP → JS business verisi aktarılıyor
+// PHP → JS business verisi
 const businesses = <?= json_encode($businesses) ?>;
 
 // MAP INIT
@@ -119,14 +121,14 @@ function createPopup(b) {
     return `
         <strong>${b.name}</strong><br>
         Category: ${b.category}<br>
-        Rating: ${b.rating ? b.rating.toFixed(1) : "No reviews"} ★<br>
-        <a href="business_detail.php?id=${b.shop_id}">
-            View details
+        Rating: ${b.rating ? b.rating.toFixed(1) : "No reviews"} ★<br><br>
+        <a href="business_detail.php?id=${b.shop_id}" style="color:#e53935; font-weight:600;">
+            View details →
         </a>
     `;
 }
 
-// Markerları çizdir
+// Marker çizici
 function renderMarkers(list) {
     markers.forEach(m => map.removeLayer(m));
     markers = [];
@@ -134,16 +136,16 @@ function renderMarkers(list) {
     list.forEach(b => {
         if (!b.latitude || !b.longitude) return;
 
-        let marker = L.marker([b.latitude, b.longitude]).addTo(map);
+        const marker = L.marker([b.latitude, b.longitude]).addTo(map);
         marker.bindPopup(createPopup(b));
         markers.push(marker);
     });
 }
 
-// İlk çizim
+// İlk render
 renderMarkers(businesses);
 
-// Filtering
+// Arama ve filtre
 const searchInput = document.getElementById("searchInput");
 const categoryFilter = document.getElementById("categoryFilter");
 
@@ -162,7 +164,6 @@ function applyFilters() {
 
 searchInput.addEventListener("input", applyFilters);
 categoryFilter.addEventListener("change", applyFilters);
-
 </script>
 
 </body>

@@ -120,6 +120,10 @@ $categoryList = $categoryQuery->fetchAll(PDO::FETCH_COLUMN);
                     <th>Details</th>
                     <th>Category</th>
                     <th>Pricing</th>
+
+                    <!-- FAVORİ BUTONU -->
+                    <th>Fav</th>
+
                     <th>Action</th>
                 </tr>
             </thead>
@@ -128,7 +132,7 @@ $categoryList = $categoryQuery->fetchAll(PDO::FETCH_COLUMN);
 
             <?php if (empty($products)): ?>
                 <tr>
-                    <td colspan="5" style="text-align:center; padding:20px;">
+                    <td colspan="6" style="text-align:center; padding:20px;">
                         No products yet.
                     </td>
                 </tr>
@@ -183,6 +187,14 @@ $categoryList = $categoryQuery->fetchAll(PDO::FETCH_COLUMN);
                             <?php endif; ?>
                         </td>
 
+                        <!-- FAVORİ -->
+                        <td style="text-align:center;">
+                            <a href="add_fav_product.php?id=<?= $p['id'] ?>" 
+                               style="color:#e53935; font-size:20px; text-decoration:none;">
+                                ♥
+                            </a>
+                        </td>
+
                         <!-- Delete -->
                         <td>
                             <form method="POST" onsubmit="return confirm('Delete this product?');">
@@ -204,37 +216,28 @@ $categoryList = $categoryQuery->fetchAll(PDO::FETCH_COLUMN);
             </tbody>
         </table>
 
-
-        <!-- ============================
-             PAGINATION BUTTONS
-        =========================== -->
+        <!-- PAGINATION -->
         <?php if ($totalProdPages > 1): ?>
             <div style="margin-top:20px; display:flex; gap:6px;">
-
                 <?php if ($prodPage > 1): ?>
-                    <a href="?tab=products&page=<?= $prodPage - 1 ?>"
-                       style="padding:6px 12px; background:#eee; border-radius:6px; text-decoration:none;">
+                    <a href="?tab=products&page=<?= $prodPage - 1 ?>" style="padding:6px 12px; background:#eee;">
                         « Prev
                     </a>
                 <?php endif; ?>
 
                 <?php for ($i = 1; $i <= $totalProdPages; $i++): ?>
                     <a href="?tab=products&page=<?= $i ?>"
-                       style="
-                           padding:6px 12px; border-radius:6px; text-decoration:none;
-                           <?= $i == $prodPage ? 'background:#e53935;color:white;' : 'background:#f3f3f3;' ?>
-                       ">
+                       style="padding:6px 12px;
+                       <?= $i == $prodPage ? 'background:#e53935;color:white;' : 'background:#f3f3f3;' ?>">
                         <?= $i ?>
                     </a>
                 <?php endfor; ?>
 
                 <?php if ($prodPage < $totalProdPages): ?>
-                    <a href="?tab=products&page=<?= $prodPage + 1 ?>"
-                       style="padding:6px 12px; background:#eee; border-radius:6px; text-decoration:none;">
+                    <a href="?tab=products&page=<?= $prodPage + 1 ?>" style="padding:6px 12px; background:#eee;">
                         Next »
                     </a>
                 <?php endif; ?>
-
             </div>
         <?php endif; ?>
 
