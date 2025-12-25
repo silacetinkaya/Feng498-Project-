@@ -1,25 +1,40 @@
 <?php
+require "db_connect.php";
 
+// TÜM BUSINESS'LARI ÇEK
+$stmt = $pdo->prepare("
+    SELECT 
+        b.shop_id,
+        b.name,
+        b.category,
+        b.latitude,
+        b.longitude,
+        b.description,
+        b.tel_no,
+        COALESCE(AVG(r.rank), 0) AS rating
+    FROM business b
+    LEFT JOIN reviews r ON r.business_id = b.shop_id
+    GROUP BY b.shop_id
+");
+$stmt->execute();
+$businesses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Pricely – Discover Nearby Businesses</title>
 
-    <!-- Leaflet CSS (CDN) -->
-    <link
-        rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-        crossorigin=""
-    />
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet"
+          href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
     <style>
         html, body {
             margin: 0;
             height: 100%;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: system-ui;
         }
 
         .page {
@@ -31,52 +46,50 @@
         .topbar {
             padding: 10px 16px;
             background: #e53935;
-            color: #fff;
+            color: white;
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
 
-        .topbar-title {
-            font-weight: 600;
-        }
-
-        .topbar-search {
-            display: flex;
-            gap: 8px;
-        }
-
-        .topbar-search input {
-            padding: 6px 8px;
-            border-radius: 999px;
-            border: none;
-            min-width: 220px;
-        }
-
-        .topbar-search select {
-            padding: 6px 8px;
-            border-radius: 999px;
-            border: none;
-        }
-
         #map {
             flex: 1;
+        }
+
+        .topbar input, .topbar select {
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: none;
         }
     </style>
 </head>
 <body>
 
 <div class="page">
-    <!-- Basit üst bar -->
+
+    <!-- TOP BAR -->
     <header class="topbar">
-        <div class="topbar-title">Pricely – Explore Businesses</div>
-        <div class="topbar-search">
-            <input type="text" id="searchInput" placeholder="Search by name…">
+        <div style="font-weight:700;">Pricely – Explore</div>
+
+        <div>
+            <input type="text" id="searchInput" placeholder="Search business...">
+
             <select id="categoryFilter">
-                <option value="">All categories</option>
-                <option value="hairdresser">Hairdresser</option>
-                <option value="cafe">Café</option>
-                <option value="repair">Repair</option>
+                <option value="">All Categories</option>
+                <option value="Repair">Repair</option>
+                <option value="Hair Dresser">Hair Dresser</option>
+                <option value="Grocery">Grocery</option>
+                <option value="Restaurant">Restaurant</option>
+                <option value="Cafe">Cafe</option>
+                <option value="Kiosk">Kiosk</option>
+                <option value="Nail Bar">Nail Bar</option>
+                <option value="Pub">Pub</option>
+                <option value="Club">Club</option>
+                <option value="Bakery">Bakery</option>
+                <option value="Flower Shop">Flower Shop</option>
+                <option value="Pet-Shop">Pet Shop</option>
+                <option value="Gym">Gym</option>
+                <option value="Tattoo">Tattoo</option>
             </select>
         </div>
     </header>
@@ -85,109 +98,70 @@
     <div id="map"></div>
 </div>
 
-<!-- Leaflet JS (CDN) -->
-<script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin="">
-</script>
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-// ===============
-// FAKE DATA (şimdilik)
-// ===============
-const businesses = [
-    {
-        id: 1,
-        name: "Red Scissors Kuaför",
-        category: "hairdresser",
-        lat: 38.386,  // Balçova civarı
-        lng: 27.053,
-        address: "Balçova, İzmir",
-        rating: 4.6
-    },
-    {
-        id: 2,
-        name: "Blue Cup Café",
-        category: "cafe",
-        lat: 38.423,  // Alsancak civarı
-        lng: 27.142,
-        address: "Alsancak, İzmir",
-        rating: 4.2
-    },
-    {
-        id: 3,
-        name: "QuickFix Phone Repair",
-        category: "repair",
-        lat: 38.419,
-        lng: 27.134,
-        address: "Konak, İzmir",
-        rating: 4.8
-    }
-];
+// PHP → JS business verisi aktarılıyor
+const businesses = <?= json_encode($businesses) ?>;
 
-// ===============
 // MAP INIT
-// ===============
-const map = L.map('map').setView([38.41, 27.13], 12); // İzmir
+const map = L.map('map').setView([38.4192, 27.1287], 12); // İzmir default
 
-// OpenStreetMap tile'ları:
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
+    maxZoom: 19
 }).addTo(map);
 
-// Marker'ları tutmak için:
 let markers = [];
 
-// popup içeriğini yapan fonksiyon
-function createPopupContent(b) {
+// Marker popup yapıcı
+function createPopup(b) {
     return `
         <strong>${b.name}</strong><br>
         Category: ${b.category}<br>
-        Rating: ${b.rating ?? "–"} ★<br>
-        <small>${b.address}</small><br><br>
-        <a href="business_detail.php?id=${b.id}">View details</a>
+        Rating: ${b.rating ? b.rating.toFixed(1) : "No reviews"} ★<br>
+        <a href="business_detail.php?id=${b.shop_id}">
+            View details
+        </a>
     `;
 }
 
-// haritaya marker ekleyen fonksiyon
-function renderMarkers(filteredList) {
-    // önce eskileri sil
+// Markerları çizdir
+function renderMarkers(list) {
     markers.forEach(m => map.removeLayer(m));
     markers = [];
 
-    filteredList.forEach(b => {
-        const marker = L.marker([b.lat, b.lng]).addTo(map);
-        marker.bindPopup(createPopupContent(b));
+    list.forEach(b => {
+        if (!b.latitude || !b.longitude) return;
+
+        let marker = L.marker([b.latitude, b.longitude]).addTo(map);
+        marker.bindPopup(createPopup(b));
         markers.push(marker);
     });
 }
 
-// ilk render: hepsi
+// İlk çizim
 renderMarkers(businesses);
 
-// ===============
-// Filter / Search
-// ===============
-const searchInput = document.getElementById('searchInput');
-const categoryFilter = document.getElementById('categoryFilter');
+// Filtering
+const searchInput = document.getElementById("searchInput");
+const categoryFilter = document.getElementById("categoryFilter");
 
 function applyFilters() {
-    const text = searchInput.value.toLowerCase();
-    const cat  = categoryFilter.value;
+    const txt = searchInput.value.toLowerCase();
+    const cat = categoryFilter.value;
 
     const filtered = businesses.filter(b => {
-        const matchesText = b.name.toLowerCase().includes(text);
-        const matchesCat  = !cat || b.category === cat;
-        return matchesText && matchesCat;
+        const matchTxt = b.name.toLowerCase().includes(txt);
+        const matchCat = !cat || b.category === cat;
+        return matchTxt && matchCat;
     });
 
     renderMarkers(filtered);
 }
 
-searchInput.addEventListener('input', applyFilters);
-categoryFilter.addEventListener('change', applyFilters);
+searchInput.addEventListener("input", applyFilters);
+categoryFilter.addEventListener("change", applyFilters);
 
 </script>
 

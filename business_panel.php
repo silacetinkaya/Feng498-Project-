@@ -1,5 +1,6 @@
 <?php
-require 'db.php';
+require 'db_connect.php';
+
 
 // TEMP login — later use: $_SESSION['user_id'];
 $ownerId = 1;
@@ -49,66 +50,142 @@ $errorMessage   = null;
 // ---------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
-    // Update business info + hours
+    /* -------------------------
+       UPDATE BUSINESS INFO + ADDRESS + HOURS
+       ------------------------- */
     if (isset($_POST['update_business'])) {
         try {
+
+            /* ------------------------------------
+               1) BUSINESS TABLOSUNU GÜNCELLE
+               ------------------------------------ */
             $upd = $pdo->prepare("
                 UPDATE business SET
                     name = :name,
-                    address = :address,
+                    category = :category,
                     tel_no = :tel_no,
-                    description = :description
+                    description = :description,
+                    latitude = :lat,
+                    longitude = :lng
                 WHERE shop_id = :sid
             ");
+
             $upd->execute([
-                'name' => $_POST['name'] ?? '',
-                'address' => $_POST['address'] ?? '',
-                'tel_no' => $_POST['tel_no'] ?? '',
+                'name'        => $_POST['name'] ?? '',
+                'category'    => $_POST['category'] ?? '',
+                'tel_no'      => $_POST['tel_no'] ?? '',
                 'description' => $_POST['description'] ?? '',
-                'sid' => $businessId
+                'lat'         => !empty($_POST['lat']) ? $_POST['lat'] : null,
+                'lng'         => !empty($_POST['lng']) ? $_POST['lng'] : null,
+                'sid'         => $businessId
             ]);
 
+
+            /* ------------------------------------
+               2) ADDRESS TABLOSUNU GÜNCELLE / EKLE
+               ------------------------------------ */
+            $check = $pdo->prepare("SELECT id FROM address WHERE business_id = :bid LIMIT 1");
+            $check->execute(['bid' => $businessId]);
+            $addrId = $check->fetchColumn();
+
+            if ($addrId) {
+
+                // ---- UPDATE ----
+                $u = $pdo->prepare("
+                    UPDATE address SET
+                        city = :city,
+                        district = :district,
+                        neighbourhood = :neigh,
+                        address = :addr,
+                        country = 'Turkey'
+                    WHERE business_id = :bid
+                ");
+
+                $u->execute([
+                    'city'     => $_POST['city'] ?? '',
+                    'district' => $_POST['district'] ?? '',
+                    'neigh'    => $_POST['neighbourhood'] ?? '',
+                    'addr'     => $_POST['full_address'] ?? '',
+                    'bid'      => $businessId
+                ]);
+
+            } else {
+
+                // ---- INSERT ----
+                $i = $pdo->prepare("
+                    INSERT INTO address (business_id, city, district, neighbourhood, address, country)
+                    VALUES (:bid, :city, :district, :neigh, :addr, 'Turkey')
+                ");
+
+                $i->execute([
+                    'bid'       => $businessId,
+                    'city'      => $_POST['city'] ?? '',
+                    'district'  => $_POST['district'] ?? '',
+                    'neigh'     => $_POST['neighbourhood'] ?? '',
+                    'addr'      => $_POST['full_address'] ?? ''
+                ]);
+            }
+
+            /* ------------------------------------
+               3) HOURS (senin mevcut kodun—dokunmadım)
+               ------------------------------------ */
             foreach ($days as $day) {
-                $open   = $_POST["open_$day"]   ?? '';
-                $close  = $_POST["close_$day"]  ?? '';
+                $open   = $_POST["open_$day"] ?? '';
+                $close  = $_POST["close_$day"] ?? '';
                 $closed = isset($_POST["closed_$day"]) ? 1 : 0;
 
-                $openVal  = $closed || $open  === '' ? null : $open;
-                $closeVal = $closed || $close === '' ? null : $close;
+                $openVal  = ($closed || $open === '') ? null : $open;
+                $closeVal = ($closed || $close === '') ? null : $close;
 
-                $check = $pdo->prepare("SELECT id FROM business_hours WHERE business_id = :bid AND day_of_week = :day");
-                $check->execute(['bid'=>$businessId,'day'=>$day]);
+                $check = $pdo->prepare("
+                    SELECT id FROM business_hours
+                    WHERE business_id = :bid AND day_of_week = :day
+                ");
+                $check->execute(['bid' => $businessId, 'day' => $day]);
                 $id = $check->fetchColumn();
 
                 if ($id) {
                     $u = $pdo->prepare("
                         UPDATE business_hours
-                        SET open_hour=:o, close_hour=:c, is_closed=:closed
-                        WHERE id=:id
+                        SET open_hour = :o, close_hour = :c, is_closed = :closed
+                        WHERE id = :id
                     ");
-                    $u->execute(['o'=>$openVal,'c'=>$closeVal,'closed'=>$closed,'id'=>$id]);
+                    $u->execute([
+                        'o'      => $openVal,
+                        'c'      => $closeVal,
+                        'closed' => $closed,
+                        'id'     => $id
+                    ]);
                 } else {
                     $i = $pdo->prepare("
                         INSERT INTO business_hours (business_id, day_of_week, open_hour, close_hour, is_closed)
-                        VALUES (:bid,:day,:o,:c,:closed)
+                        VALUES (:bid, :day, :o, :c, :closed)
                     ");
                     $i->execute([
-                        'bid'=>$businessId,
-                        'day'=>$day,
-                        'o'=>$openVal,
-                        'c'=>$closeVal,
-                        'closed'=>$closed
+                        'bid'    => $businessId,
+                        'day'    => $day,
+                        'o'      => $openVal,
+                        'c'      => $closeVal,
+                        'closed' => $closed
                     ]);
                 }
             }
 
-            $successMessage = "Business info updated.";
+            $successMessage = "Business info updated successfully!";
             $tab = 'info';
 
         } catch (Exception $e) {
             $errorMessage = $e->getMessage();
         }
     }
+
+
+    /* -------------------------
+       OTHER POST actions (product add, edit, delete)
+       ------------------------- */
+    // Bu kısım aynen kalacak (sende zaten çalışıyor)
+
+
 
     // Update product price
     if (isset($_POST['update_price'])) {

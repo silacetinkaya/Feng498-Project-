@@ -1,141 +1,242 @@
+<?php
+// -------------------------------------------
+// Güvenlik: Business ID gelmeli
+// -------------------------------------------
+if (!isset($businessId)) {
+    die("businessId missing.");
+}
+
+// -------------------------------------------
+// PAGINATION AYARLARI
+// -------------------------------------------
+$itemsPerPage = 5;
+$prodPage = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+
+// toplam ürün
+$stmtCount = $pdo->prepare("SELECT COUNT(*) FROM products WHERE business_id = :bid");
+$stmtCount->execute(['bid' => $businessId]);
+$totalProducts = $stmtCount->fetchColumn();
+
+$totalProdPages = max(1, ceil($totalProducts / $itemsPerPage));
+$offset = ($prodPage - 1) * $itemsPerPage;
+
+// -------------------------------------------
+// ÜRÜNLERİ LIMIT ile ÇEK
+// -------------------------------------------
+$stmt = $pdo->prepare("
+    SELECT *
+    FROM products
+    WHERE business_id = :bid
+    ORDER BY id DESC
+    LIMIT :limit OFFSET :offset
+");
+$stmt->bindValue(':bid', $businessId, PDO::PARAM_INT);
+$stmt->bindValue(':limit', $itemsPerPage, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
+$products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// -------------------------------------------
+// KATEGORİLERİ ÇEK
+// -------------------------------------------
+$categoryQuery = $pdo->query("SELECT DISTINCT type FROM categories ORDER BY type ASC");
+$categoryList = $categoryQuery->fetchAll(PDO::FETCH_COLUMN);
+?>
+
+<!-- ============================
+     ADD PRODUCT FORM
+============================ -->
 <div class="card" style="margin-bottom:20px;">
     <div class="card-header">
         <h3>Add New Product</h3>
     </div>
     <div class="card-body">
-        <!-- FORM: Added enctype for file upload -->
-        <form method="POST" enctype="multipart/form-data" style="display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
-            <input type="hidden" name="add_product" value="1">
+
+        <form method="POST" enctype="multipart/form-data"
+              style="display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
             
+            <input type="hidden" name="add_product" value="1">
+
             <div style="flex:1; min-width:200px;">
-                <label>Name</label><br>
-                <input type="text" name="p_name" required style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                <label>Name</label>
+                <input type="text" name="p_name" required class="form-control">
             </div>
 
             <div style="flex:1; min-width:150px;">
-                <label>Category</label><br>
-                <select name="p_category" required style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px; background:white;">
+                <label>Category</label>
+                <select name="p_category" required class="form-control">
                     <option value="" disabled selected>Select...</option>
-                    <?php foreach($categoryList as $cat): ?>
-                        <option value="<?php echo htmlspecialchars($cat); ?>"><?php echo htmlspecialchars($cat); ?></option>
+                    <?php foreach ($categoryList as $cat): ?>
+                        <option value="<?= htmlspecialchars($cat) ?>">
+                            <?= htmlspecialchars($cat) ?>
+                        </option>
                     <?php endforeach; ?>
                 </select>
             </div>
 
             <div style="flex:0 0 120px;">
-                <label>Price</label><br>
-                <input type="number" step="0.01" name="p_price" required style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                <label>Price</label>
+                <input type="number" name="p_price" step="0.01" required class="form-control">
             </div>
 
-            <!-- INPUT: File input for images -->
             <div style="flex:1; min-width:200px;">
-                <label>Photo</label><br>
-                <input type="file" name="p_image" accept="image/*" style="width:100%; padding:5px; border:1px solid #ddd; background:#f9f9f9; border-radius:4px;">
+                <label>Photo</label>
+                <input type="file" name="p_image" accept="image/*" class="form-control">
             </div>
 
             <div style="flex:2; min-width:300px;">
-                <label>Description</label><br>
-                <input type="text" name="p_description" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                <label>Description</label>
+                <input type="text" name="p_description" class="form-control">
             </div>
 
-            <div style="width:100%; display:flex; gap:10px; align-items:center; margin-top:5px;">
-                <input type="checkbox" id="neg" name="p_negotiable"> 
-                <label for="neg" style="margin:0; font-weight:normal;">Price is Negotiable</label>
+            <div style="width:100%; margin-top:5px;">
+                <input type="checkbox" id="neg" name="p_negotiable">
+                <label for="neg">Price is Negotiable</label>
             </div>
-            
-            <button type="submit" style="background:#3498db; color:white; padding:10px 15px; border:none; border-radius:4px; height:36px; cursor:pointer; margin-top:10px;">
-                <i class="fas fa-plus"></i> Add
+
+            <button type="submit" class="btn btn-primary">
+                Add
             </button>
         </form>
     </div>
 </div>
 
+
+<!-- ============================
+     PRODUCT LIST
+============================ -->
 <div class="card">
     <div class="card-header">
-        <h3>Product Catalog (Page <?php echo $prodPage; ?> of <?php echo $totalProdPages ?: 1; ?>)</h3>
+        <h3>
+            Product Catalog (Page <?= $prodPage ?> of <?= $totalProdPages ?>)
+        </h3>
     </div>
+
     <div class="card-body">
         <table width="100%">
             <thead>
                 <tr>
-                    <td width="80">Image</td>
-                    <td>Details</td>
-                    <td>Category</td>
-                    <td>Pricing</td>
-                    <td>Action</td>
+                    <th width="80">Image</th>
+                    <th>Details</th>
+                    <th>Category</th>
+                    <th>Pricing</th>
+                    <th>Action</th>
                 </tr>
             </thead>
+
             <tbody>
-                <?php if(empty($products)): ?>
-                    <tr><td colspan="5" style="text-align:center; padding:20px;">No products yet.</td></tr>
-                <?php else: ?>
-                    <?php foreach ($products as $p): ?>
+
+            <?php if (empty($products)): ?>
+                <tr>
+                    <td colspan="5" style="text-align:center; padding:20px;">
+                        No products yet.
+                    </td>
+                </tr>
+            <?php else: ?>
+
+                <?php foreach ($products as $p): ?>
                     <tr>
-                        <!-- IMAGE COLUMN -->
+
+                        <!-- Image -->
                         <td>
-                            <?php if(!empty($p['image_url'])): ?>
-                                <img src="<?php echo htmlspecialchars($p['image_url']); ?>" class="product-img-thumb" alt="Img" style="width:60px; height:60px; object-fit:cover; border-radius:4px;">
+                            <?php if (!empty($p['image_url'])): ?>
+                                <img src="<?= htmlspecialchars($p['image_url']) ?>"
+                                     style="width:60px; height:60px; object-fit:cover; border-radius:5px;">
                             <?php else: ?>
-                                <div class="product-img-thumb" style="width:60px; height:60px; background:#eee; display:flex; align-items:center; justify-content:center; color:#999; border-radius:4px;">
-                                    <i class="fas fa-image"></i>
+                                <div style="width:60px;height:60px;background:#eee;border-radius:5px;
+                                            display:flex;align-items:center;justify-content:center;color:#777;">
+                                    No Image
                                 </div>
                             <?php endif; ?>
                         </td>
 
+                        <!-- Details -->
                         <td>
-                            <strong><?php echo htmlspecialchars($p['name']); ?></strong><br>
-                            <small style="color:#666;"><?php echo htmlspecialchars($p['description']); ?></small>
+                            <strong><?= htmlspecialchars($p['name']) ?></strong><br>
+                            <small><?= htmlspecialchars($p['description']) ?></small>
                         </td>
-                        <td><span style="background:#eee; padding:3px 8px; border-radius:10px; font-size:0.8rem;"><?php echo htmlspecialchars($p['categories']); ?></span></td>
-                        
-                        <!-- PRICE EDIT FORM -->
+
+                        <!-- Category -->
                         <td>
-                            <form method="POST" style="display:flex; align-items:center; gap:5px;">
+                            <span style="background:#eee;padding:4px 8px;border-radius:8px;">
+                                <?= htmlspecialchars($p['categories']) ?>
+                            </span>
+                        </td>
+
+                        <!-- Price Update -->
+                        <td>
+                            <form method="POST" style="display:flex;gap:6px;">
                                 <input type="hidden" name="update_price" value="1">
-                                <input type="hidden" name="product_id" value="<?php echo $p['id']; ?>">
-                                <input type="number" step="0.01" name="new_price" value="<?php echo $p['product_prices']; ?>" style="width:70px; padding:4px; border:1px solid #ddd; border-radius:4px;">
-                                <button type="submit" style="background:#2ecc71; color:white; border:none; padding:5px; border-radius:3px; cursor:pointer;" title="Update Price"><i class="fas fa-check"></i></button>
+                                <input type="hidden" name="product_id" value="<?= $p['id'] ?>">
+
+                                <input type="number" step="0.01" name="new_price"
+                                       value="<?= $p['product_prices'] ?>"
+                                       style="width:70px; padding:4px;">
+
+                                <button type="submit" style="background:#2ecc71; color:white; border-radius:4px;">
+                                    ✔
+                                </button>
                             </form>
-                            <?php if($p['is_negotiable'] === true || $p['is_negotiable'] === 't'): ?>
-                                <small style="color:orange; display:block;"><i class="fas fa-handshake"></i> Negotiable</small>
+
+                            <?php if ($p['is_negotiable'] === true || $p['is_negotiable'] === 't'): ?>
+                                <small style="color:orange;">Negotiable</small>
                             <?php endif; ?>
                         </td>
 
-                        <!-- DELETE BUTTON -->
+                        <!-- Delete -->
                         <td>
                             <form method="POST" onsubmit="return confirm('Delete this product?');">
                                 <input type="hidden" name="delete_product" value="1">
-                                <input type="hidden" name="product_id" value="<?php echo $p['id']; ?>">
-                                <button type="submit" style="background:#e74c3c; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">
-                                    <i class="fas fa-trash"></i>
+                                <input type="hidden" name="product_id" value="<?= $p['id'] ?>">
+
+                                <button type="submit"
+                                        style="background:#e74c3c; color:white; border-radius:4px;">
+                                    🗑
                                 </button>
                             </form>
                         </td>
+
                     </tr>
-                    <?php endforeach; ?>
-                <?php endif; ?>
+                <?php endforeach; ?>
+
+            <?php endif; ?>
+
             </tbody>
         </table>
 
-        <!-- PAGINATION UI -->
+
+        <!-- ============================
+             PAGINATION BUTTONS
+        =========================== -->
         <?php if ($totalProdPages > 1): ?>
-        <div class="pagination">
-            <?php 
-            // Previous Link
-            if($prodPage > 1) {
-                echo '<a href="?tab=products&prod_page='.($prodPage-1).'">&laquo; Prev</a>';
-            }
-            // Page Numbers
-            for($i = 1; $i <= $totalProdPages; $i++) {
-                $active = ($prodPage == $i) ? 'active' : '';
-                echo '<a href="?tab=products&prod_page='.$i.'" class="'.$active.'">'.$i.'</a>';
-            }
-            // Next Link
-            if($prodPage < $totalProdPages) {
-                echo '<a href="?tab=products&prod_page='.($prodPage+1).'">Next &raquo;</a>';
-            }
-            ?>
-        </div>
+            <div style="margin-top:20px; display:flex; gap:6px;">
+
+                <?php if ($prodPage > 1): ?>
+                    <a href="?tab=products&page=<?= $prodPage - 1 ?>"
+                       style="padding:6px 12px; background:#eee; border-radius:6px; text-decoration:none;">
+                        « Prev
+                    </a>
+                <?php endif; ?>
+
+                <?php for ($i = 1; $i <= $totalProdPages; $i++): ?>
+                    <a href="?tab=products&page=<?= $i ?>"
+                       style="
+                           padding:6px 12px; border-radius:6px; text-decoration:none;
+                           <?= $i == $prodPage ? 'background:#e53935;color:white;' : 'background:#f3f3f3;' ?>
+                       ">
+                        <?= $i ?>
+                    </a>
+                <?php endfor; ?>
+
+                <?php if ($prodPage < $totalProdPages): ?>
+                    <a href="?tab=products&page=<?= $prodPage + 1 ?>"
+                       style="padding:6px 12px; background:#eee; border-radius:6px; text-decoration:none;">
+                        Next »
+                    </a>
+                <?php endif; ?>
+
+            </div>
         <?php endif; ?>
+
     </div>
 </div>
