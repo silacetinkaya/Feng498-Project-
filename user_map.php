@@ -1,25 +1,3 @@
-<?php
-require "db_connect.php";
-
-// TÜM BUSINESS'LARI ÇEK
-$stmt = $pdo->prepare("
-    SELECT 
-        b.shop_id,
-        b.name,
-        b.category,
-        b.latitude,
-        b.longitude,
-        b.description,
-        b.tel_no,
-        COALESCE(AVG(r.rank), 0) AS rating
-    FROM business b
-    LEFT JOIN reviews r ON r.business_id = b.shop_id
-    GROUP BY b.shop_id
-");
-$stmt->execute();
-$businesses = $stmt->fetchAll(PDO::FETCH_ASSOC);
-?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -31,47 +9,129 @@ $businesses = $stmt->fetchAll(PDO::FETCH_ASSOC);
           href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
     <style>
-        html, body {
-          margin: 0;
-          padding: 0;
-          height: 100%;
-        }
+        /* RESET */
+* {
+    box-sizing: border-box;
+    font-family: Arial, Helvetica, sans-serif;
+}
 
-        .page {
-          display: flex;
-          flex-direction: column;
-         height: 100vh; /* tam ekran */
-         }
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #f5f5f5;
+}
 
-        .topbar {
-          height: 60px;
-         flex-shrink: 0;
-          z-index: 10;
-         position: relative;
-        }
+/* PAGE */
+.page {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
 
-        #map {
-         flex: 1;
-          width: 100%;
-          height: calc(100vh - 60px);
-         position: relative;
-         z-index: 1;
-        }
+/* TOP BAR */
+.topbar {
+    height: 60px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: #ffffff;
+    border-bottom: 3px solid #d32f2f; /* KIRMIZI VURGU */
+    z-index: 10;
+}
 
-        .leaflet-container {
-         z-index: 1 !important;
-        }
+.topbar div:first-child {
+    font-weight: 700;
+    font-size: 16px;
+    color: #d32f2f; /* KIRMIZI BAŞLIK */
+}
 
+/* INPUTS */
+.topbar input,
+.topbar select {
+    height: 36px;
+    padding: 0 10px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background: #fff;
+    font-size: 13px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.topbar input {
+    width: 200px;
+    margin-right: 8px;
+}
+
+.topbar input:focus,
+.topbar select:focus {
+    outline: none;
+    border-color: #d32f2f;
+    box-shadow: 0 0 0 2px rgba(211,47,47,0.15);
+}
+
+/* MAP */
+#map {
+    flex: 1;
+    width: 100%;
+    height: calc(100vh - 60px);
+    background: #e0e0e0;
+}
+
+/* LEAFLET CONTROLS */
+.leaflet-control-zoom {
+    border: 1px solid #ccc;
+    box-shadow: none;
+}
+
+.leaflet-control-zoom a {
+    background: #ffffff !important;
+    color: #d32f2f !important; /* KIRMIZI ICON */
+    border-bottom: 1px solid #ddd !important;
+    font-weight: bold;
+}
+
+.leaflet-control-zoom a:last-child {
+    border-bottom: none !important;
+}
+
+.leaflet-control-zoom a:hover {
+    background: #fdecea !important; /* AÇIK KIRMIZI */
+}
+
+/* POPUP */
+.leaflet-popup-content-wrapper {
+    border-radius: 6px;
+    border-top: 4px solid #d32f2f; /* KIRMIZI ŞERİT */
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.leaflet-popup-content {
+    font-size: 13px;
+    color: #333;
+    margin: 10px;
+}
+
+.leaflet-popup-content strong {
+    color: #d32f2f;
+}
+
+.leaflet-popup-tip {
+    box-shadow: none;
+}
         
     </style>
 </head>
-<body>
+<body class="iframe-mode">
+
 
 <div class="page">
 
     <!-- TOP BAR -->
     <header class="topbar">
-        <div style="font-weight:700;">Pricely – Explore</div>
+        <div>Pricely – Explore</div>
 
         <div>
             <input type="text" id="searchInput" placeholder="Search business...">
@@ -104,31 +164,30 @@ $businesses = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-// PHP → JS business verisi
-const businesses = <?= json_encode($businesses) ?>;
-
 // MAP INIT
-const map = L.map('map').setView([38.4192, 27.1287], 12); // İzmir default
+const map = L.map('map').setView([38.4192, 27.1287], 12);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19
 }).addTo(map);
 
 let markers = [];
+let allBusinesses = [];
 
-// Marker popup yapıcı
+// Popup
 function createPopup(b) {
     return `
         <strong>${b.name}</strong><br>
         Category: ${b.category}<br>
-        Rating: ${b.rating ? b.rating.toFixed(1) : "No reviews"} ★<br><br>
-        <a href="business_detail.php?id=${b.shop_id}" style="color:#e53935; font-weight:600;">
+        Rating: ${parseFloat(b.rating).toFixed(1)} ★<br><br>
+        <a href="business_detail.php?id=${b.shop_id}"
+           style="color:#d32f2f; font-weight:600;">
             View details →
         </a>
     `;
 }
 
-// Marker çizici
+// Marker çiz
 function renderMarkers(list) {
     markers.forEach(m => map.removeLayer(m));
     markers = [];
@@ -136,24 +195,33 @@ function renderMarkers(list) {
     list.forEach(b => {
         if (!b.latitude || !b.longitude) return;
 
-        const marker = L.marker([b.latitude, b.longitude]).addTo(map);
-        marker.bindPopup(createPopup(b));
-        markers.push(marker);
+        const m = L.marker([b.latitude, b.longitude]).addTo(map);
+        m.bindPopup(createPopup(b));
+        markers.push(m);
     });
+
+    if (markers.length) {
+        const group = L.featureGroup(markers);
+        map.fitBounds(group.getBounds(), { padding: [40, 40] });
+    }
 }
 
-// İlk render
-renderMarkers(businesses);
+// API
+function loadBusinesses() {
+    fetch("get_businesses.php")
+        .then(r => r.json())
+        .then(data => {
+            allBusinesses = data;
+            applyFilters();
+        });
+}
 
-// Arama ve filtre
-const searchInput = document.getElementById("searchInput");
-const categoryFilter = document.getElementById("categoryFilter");
-
+// Filters
 function applyFilters() {
-    const txt = searchInput.value.toLowerCase();
-    const cat = categoryFilter.value;
+    const txt = document.getElementById("searchInput").value.toLowerCase();
+    const cat = document.getElementById("categoryFilter").value;
 
-    const filtered = businesses.filter(b => {
+    const filtered = allBusinesses.filter(b => {
         const matchTxt = b.name.toLowerCase().includes(txt);
         const matchCat = !cat || b.category === cat;
         return matchTxt && matchCat;
@@ -162,8 +230,12 @@ function applyFilters() {
     renderMarkers(filtered);
 }
 
-searchInput.addEventListener("input", applyFilters);
-categoryFilter.addEventListener("change", applyFilters);
+document.getElementById("searchInput").addEventListener("input", applyFilters);
+document.getElementById("categoryFilter").addEventListener("change", applyFilters);
+
+// Init
+loadBusinesses();
+setInterval(loadBusinesses, 5000);
 </script>
 
 </body>

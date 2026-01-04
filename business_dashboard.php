@@ -395,9 +395,8 @@ $categories = [
 
             <form method="POST">
                 <input type="hidden" name="update_business" value="1">
-                <input type="hidden" name="lat" id="latInput">
-                <input type="hidden" name="lng" id="lngInput">
-
+                <input type="hidden" name="latitude" value="<?= htmlspecialchars($business['latitude'] ?? '') ?>">
+                <input type="hidden" name="longitude" value="<?= htmlspecialchars($business['longitude'] ?? '') ?>">
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
 
                     <!-- SOL TARAF -->
