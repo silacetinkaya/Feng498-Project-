@@ -186,11 +186,6 @@ ob_end_flush();
                 
                 <button type="submit" class="btn-admin">Authenticate</button>
                 
-                <div class="toggle-link">
-                    <a href="index.html">
-                        &larr; Return to Site
-                    </a>
-                </div>
             </form>
         </div>
 
