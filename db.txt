@@ -206,3 +206,35 @@ CREATE TABLE price_lists (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_pricelist_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
 );
+
+ALTER TABLE address
+ADD COLUMN district VARCHAR(100);
+
+ALTER TABLE business
+ADD COLUMN latitude NUMERIC(9,6);
+
+ALTER TABLE business
+ADD COLUMN longitude NUMERIC(9,6);
+
+ALTER TABLE business
+ADD COLUMN category VARCHAR(100);
+
+
+CREATE TABLE product_favorites (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL,
+    product_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT fk_prod_fav_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_prod_fav_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+CREATE TABLE business_favorites (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL,
+    business_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT fk_biz_fav_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_biz_fav_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+DROP TABLE IF EXISTS favorites;

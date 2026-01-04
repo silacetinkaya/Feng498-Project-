@@ -21,7 +21,7 @@ $business = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$business) { echo "Business not found."; exit; }
 $businessId = $business['shop_id'];
 
-// 2. FETCH CATEGORIES
+// 2. FETCH CATEGORIES (For Dropdown)
 $catStmt = $pdo->query("SELECT type FROM categories WHERE business_id IS NULL ORDER BY type ASC");
 $categoryList = $catStmt->fetchAll(PDO::FETCH_COLUMN);
 
@@ -34,6 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['upload_pricelist'])) {
         try {
             if (isset($_FILES['pl_image']) && $_FILES['pl_image']['error'] === UPLOAD_ERR_OK) {
+
                 $uploadDir = 'uploads/pricelists/';
                 if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
 
@@ -51,6 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->execute([$businessId, $uploadDir . $newFile]);
                     $successMessage = "Price list uploaded successfully.";
                 }
+
             } else {
                 throw new Exception("Please select a file.");
             }
@@ -70,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     /* ----------------------------
-       RESPOND TO REVIEW (FIXED)
+       RESPOND TO REVIEW
     ----------------------------- */
     if (isset($_POST['respond_to_review'])) {
         try {
@@ -78,8 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $respText = trim($_POST['response_text']);
 
             if (!empty($respText)) {
-                // FIX: Use ON CONFLICT to Update if it already exists
-                // We also set is_approved = FALSE so admins must re-approve edited responses
+                // Upsert response
                 $sql = "INSERT INTO review_responses (review_id, business_id, response_text, is_approved) 
                         VALUES (:rid, :bid, :txt, FALSE)
                         ON CONFLICT (review_id) 
@@ -94,8 +95,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'bid' => $businessId, 
                     'txt' => $respText
                 ]);
-                
-                $successMessage = "Response saved successfully. Waiting for admin approval.";
+                $successMessage = "Response posted successfully. Waiting for admin approval.";
             }
         } catch (Exception $e) {
             $errorMessage = "Error posting response: " . $e->getMessage();
@@ -158,41 +158,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     /* ----------------------------
+       UPDATE PRODUCT PRICE
+    ----------------------------- */
+    if (isset($_POST['update_price'])) {
+        try {
+            $upd = $pdo->prepare("UPDATE products SET product_prices = ? WHERE id = ? AND business_id = ?");
+            $upd->execute([$_POST['new_price'], $_POST['product_id'], $businessId]);
+            $successMessage = "Price updated.";
+        } catch (Exception $e) {
+            $errorMessage = "Error updating price.";
+        }
+    }
+
+    /* ----------------------------
        UPDATE BUSINESS INFO
     ----------------------------- */
     if (isset($_POST['update_business'])) {
-        $upd = $pdo->prepare("UPDATE business SET name=?, address=?, tel_no=?, description=? WHERE shop_id=?");
-        $upd->execute([
-            $_POST['name'], 
-            $_POST['address'], 
-            $_POST['tel_no'], 
-            $_POST['description'], 
-            $businessId
-        ]);
-        
-        // Update hours logic
-        $days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-        foreach ($days as $day) {
-            $open = $_POST["open_$day"] ?? null;
-            $close = $_POST["close_$day"] ?? null;
-            $closed = isset($_POST["closed_$day"]) ? '1' : '0'; 
-            if($open === '') $open = null;
-            if($close === '') $close = null;
+        try {
+            $upd = $pdo->prepare("UPDATE business SET name=?, address=?, tel_no=?, description=?, category=?, latitude=?, longitude=? WHERE shop_id=?");
+            $upd->execute([
+                $_POST['name'] ?? '',
+                $_POST['address'] ?? '',
+                $_POST['tel_no'] ?? '',
+                $_POST['description'] ?? '',
+                $_POST['category'] ?? '', 
+                !empty($_POST['latitude']) ? $_POST['latitude'] : null,
+                !empty($_POST['longitude']) ? $_POST['longitude'] : null,
+                $businessId
+            ]);
+            
+            // Refresh business data
+            $stmt->execute(['id' => $ownerId]);
+            $business = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            $check = $pdo->prepare("SELECT id FROM business_hours WHERE business_id = ? AND day_of_week = ?");
-            $check->execute([$businessId, $day]);
-            $exists = $check->fetchColumn();
+            // Update hours logic
+            $days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+            foreach ($days as $day) {
+                $open = $_POST["open_$day"] ?? null;
+                $close = $_POST["close_$day"] ?? null;
+                $closed = isset($_POST["closed_$day"]) ? '1' : '0'; 
+                if($open === '') $open = null;
+                if($close === '') $close = null;
 
-            if ($exists) {
-                $u = $pdo->prepare("UPDATE business_hours SET open_hour=?, close_hour=?, is_closed=? WHERE id=?");
-                $u->execute([$open, $close, $closed, $exists]);
-            } else {
-                $i = $pdo->prepare("INSERT INTO business_hours (business_id, day_of_week, open_hour, close_hour, is_closed) VALUES (?, ?, ?, ?, ?)");
-                $i->execute([$businessId, $day, $open, $close, $closed]);
+                $check = $pdo->prepare("SELECT id FROM business_hours WHERE business_id = ? AND day_of_week = ?");
+                $check->execute([$businessId, $day]);
+                $exists = $check->fetchColumn();
+
+                if ($exists) {
+                    $u = $pdo->prepare("UPDATE business_hours SET open_hour=?, close_hour=?, is_closed=? WHERE id=?");
+                    $u->execute([$open, $close, $closed, $exists]);
+                } else {
+                    $i = $pdo->prepare("INSERT INTO business_hours (business_id, day_of_week, open_hour, close_hour, is_closed) VALUES (?, ?, ?, ?, ?)");
+                    $i->execute([$businessId, $day, $open, $close, $closed]);
+                }
             }
-        }
 
-        $successMessage = "Info updated.";
+            $successMessage = "Info updated.";
+        } catch (Exception $e) {
+            $errorMessage = "Error updating: " . $e->getMessage();
+        }
     }
 }
 
@@ -229,7 +253,7 @@ $stmtProd->execute([$businessId]);
 $products = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
 
 /* ----------------------------
-   REVIEWS (Ensuring is_approved is selected)
+   REVIEWS
 ----------------------------- */
 $revSql = "
     SELECT r.*, u.full_name, 
@@ -265,6 +289,28 @@ while ($row = $stmtHours->fetch(PDO::FETCH_ASSOC)) {
         'closed' => (bool)$row['is_closed']
     ];
 }
+
+// Address Fetching for Info Tab
+$stmtAddr = $pdo->prepare("SELECT * FROM address WHERE business_id = :bid LIMIT 1");
+$stmtAddr->execute(['bid' => $businessId]);
+$addr = $stmtAddr->fetch(PDO::FETCH_ASSOC);
+
+if (!$addr) {
+    $addr = [
+        'city'         => '',
+        'district'     => '',
+        'neighbourhood'=> '',
+        'country'      => 'Turkey',
+        'address'      => ''
+    ];
+}
+
+$categories = [
+    "Repair","Hair Dresser","Grocery","Restaurant","Cafe",
+    "Kiosk","Nail Bar","Pub","Club","Bakery",
+    "Flower Shop","Pet-Shop","Gym","Tattoo"
+];
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -273,6 +319,8 @@ while ($row = $stmtHours->fetch(PDO::FETCH_ASSOC)) {
     <title>Business Dashboard</title>
     <link rel="stylesheet" href="admin.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
     <style>
         .msg { padding: 10px; border-radius: 5px; margin-bottom: 20px; }
@@ -305,6 +353,13 @@ while ($row = $stmtHours->fetch(PDO::FETCH_ASSOC)) {
         .pagination { display: flex; justify-content: center; gap: 5px; margin-top: 20px; }
         .pagination a { padding: 6px 12px; background: white; border: 1px solid #ddd; color: #333; text-decoration: none; border-radius: 4px; }
         .pagination a.active { background: #d32f2f; color: white; border-color: #d32f2f; }
+        
+        /* Form specifics */
+        .form-control { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; color: white; }
+        .btn-primary { background: #3498db; }
+        .btn-success { background: #2ecc71; }
+        .btn-danger { background: #e74c3c; }
     </style>
 </head>
 <body>
@@ -334,12 +389,443 @@ while ($row = $stmtHours->fetch(PDO::FETCH_ASSOC)) {
         <?php if ($successMessage): ?><div class="msg success"><?php echo $successMessage; ?></div><?php endif; ?>
         <?php if ($errorMessage): ?><div class="msg error"><?php echo $errorMessage; ?></div><?php endif; ?>
 
-        <?php 
-            if ($tab == 'info') include 'business_info.php';
-            elseif ($tab == 'products') include 'business_products.php';
-            elseif ($tab == 'reviews') include 'business_reviews.php';
-            elseif ($tab == 'pricelist') include 'business_pricelist.php';
-        ?>
+        <?php if ($tab == 'info'): ?>
+            <!-- BUSINESS INFO CONTENT -->
+            <h2>Business Information</h2>
+
+            <form method="POST">
+                <input type="hidden" name="update_business" value="1">
+                <input type="hidden" name="lat" id="latInput">
+                <input type="hidden" name="lng" id="lngInput">
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+
+                    <!-- SOL TARAF -->
+                    <div>
+
+                        <label>Business Name</label>
+                        <input type="text" name="name" value="<?= htmlspecialchars($business['name']) ?>" required class="form-control">
+
+                        <label>Category</label>
+                        <select name="category" required class="form-control">
+                            <option value="">Select...</option>
+                            <?php foreach($categories as $c): ?>
+                                <option value="<?= $c ?>" <?= ($business['category'] == $c ? 'selected':'') ?>>
+                                    <?= $c ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+
+                        <label>Phone</label>
+                        <input type="text" name="tel_no" value="<?= htmlspecialchars($business['tel_no']) ?>" class="form-control">
+
+                        <label>Description</label>
+                        <textarea name="description" class="form-control" rows="4"><?= htmlspecialchars($business['description']) ?></textarea>
+
+                        <!-- Şehir -->
+                        <label>City</label>
+                        <select id="citySelect" name="city" required class="form-control">
+                            <option value="">Select city...</option>
+                        </select>
+
+                        <!-- İlçe -->
+                        <label>District</label>
+                        <select id="districtSelect" name="district" required class="form-control">
+                            <option value="">Select district...</option>
+                        </select>
+
+                        <!-- Mahalle -->
+                        <label>Neighbourhood</label>
+                        <select id="neighbourhoodSelect" name="neighbourhood" required class="form-control">
+                            <option value="">Select neighbourhood...</option>
+                        </select>
+
+                        <!-- Tam adres -->
+                        <label>Full Address</label>
+                        <textarea name="address" required class="form-control"><?= htmlspecialchars($business['address'] ?? ''); ?></textarea>
+                        
+                        <!-- Hidden Coords Fields for Logic -->
+                        <input type="hidden" name="latitude" value="<?= htmlspecialchars($business['latitude'] ?? '') ?>">
+                        <input type="hidden" name="longitude" value="<?= htmlspecialchars($business['longitude'] ?? '') ?>">
+                    </div>
+
+                    <!-- SAĞ TARAF: HARİTA -->
+                    <div>
+                        <h4>Select Business Location</h4>
+                        <p>Click OR drag the marker to set your business location.</p>
+
+                        <div id="map" style="height:300px; border-radius:10px;"></div>
+                        
+                        <h4 style="margin-top:20px;">Operating Hours</h4>
+                        <table style="width:100%;">
+                            <?php foreach ($days as $day): ?>
+                            <tr>
+                                <td><?= $day ?></td>
+                                <td><input type="time" name="open_<?= $day ?>" value="<?= $hours[$day]['open'] ?>"></td>
+                                <td><input type="time" name="close_<?= $day ?>" value="<?= $hours[$day]['close'] ?>"></td>
+                                <td><input type="checkbox" name="closed_<?= $day ?>" <?= $hours[$day]['closed']?'checked':'' ?>> Closed</td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </table>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-success" style="margin-top:20px;">Save Changes</button>
+            </form>
+
+            <script>
+            // HARİTA JS
+            let defaultLat = <?= $business['latitude'] ?: "38.4192" ?>;
+            let defaultLng = <?= $business['longitude'] ?: "27.1287" ?>;
+
+            const map = L.map('map').setView([defaultLat, defaultLng], 12);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
+            }).addTo(map);
+
+            let marker = L.marker([defaultLat, defaultLng], {draggable:true}).addTo(map);
+
+            // Form inputlara ilk değerleri yaz
+            // (Note: In production ensure these IDs match the hidden inputs above)
+            document.getElementsByName("latitude")[0].value = defaultLat;
+            document.getElementsByName("longitude")[0].value = defaultLng;
+
+            map.on("click", function(e){
+                marker.setLatLng(e.latlng);
+                document.getElementsByName("latitude")[0].value = e.latlng.lat;
+                document.getElementsByName("longitude")[0].value = e.latlng.lng;
+            });
+
+            marker.on("dragend", function(){
+                let pos = marker.getLatLng();
+                document.getElementsByName("latitude")[0].value = pos.lat;
+                document.getElementsByName("longitude")[0].value = pos.lng;
+            });
+
+            // TÜRKİYE JSON DROPDOWN
+            let turkeyData = [];
+            let citySelect = document.getElementById("citySelect");
+            let districtSelect = document.getElementById("districtSelect");
+            let neighbourhoodSelect = document.getElementById("neighbourhoodSelect");
+
+            fetch("turkey.json")
+                .then(res => res.json())
+                .then(data => {
+                    turkeyData = data;
+                    data.forEach(province => {
+                        let opt = document.createElement("option");
+                        opt.value = province.Province;
+                        opt.textContent = province.Province;
+                        if ("<?= $addr['city'] ?>" === province.Province) opt.selected = true;
+                        citySelect.appendChild(opt);
+                    });
+                    if ("<?= $addr['city'] ?>") {
+                        fillDistricts("<?= $addr['city'] ?>");
+                        districtSelect.value = "<?= $addr['district'] ?>";
+                    }
+                    if ("<?= $addr['district'] ?>") {
+                        fillNeighbourhoods("<?= $addr['city'] ?>", "<?= $addr['district'] ?>");
+                        neighbourhoodSelect.value = "<?= $addr['neighbourhood'] ?>";
+                    }
+                });
+
+            function fillDistricts(cityName) {
+                districtSelect.innerHTML = '<option value="">Select district...</option>';
+                neighbourhoodSelect.innerHTML = '<option value="">Select neighbourhood...</option>';
+                let city = turkeyData.find(c => c.Province === cityName);
+                if (!city) return;
+                city.Districts.forEach(dist => {
+                    let opt = document.createElement("option");
+                    opt.value = dist.District;
+                    opt.textContent = dist.District;
+                    districtSelect.appendChild(opt);
+                });
+            }
+
+            function fillNeighbourhoods(cityName, districtName) {
+                neighbourhoodSelect.innerHTML = '<option value="">Select neighbourhood...</option>';
+                let city = turkeyData.find(c => c.Province === cityName);
+                if (!city) return;
+                let district = city.Districts.find(d => d.District === districtName);
+                if (!district) return;
+                district.Towns.forEach(town => {
+                    town.Neighbourhoods.forEach(n => {
+                        let opt = document.createElement("option");
+                        opt.value = n;
+                        opt.textContent = n;
+                        neighbourhoodSelect.appendChild(opt);
+                    });
+                });
+            }
+
+            citySelect.addEventListener("change", () => {
+                fillDistricts(citySelect.value);
+                let city = turkeyData.find(c => c.Province === citySelect.value);
+                if (city) {
+                    let [lat, lng] = city.Coordinates.split(",").map(Number);
+                    map.setView([lat, lng], 9);
+                    marker.setLatLng([lat, lng]);
+                }
+            });
+
+            districtSelect.addEventListener("change", () => {
+                fillNeighbourhoods(citySelect.value, districtSelect.value);
+                let city = turkeyData.find(c => c.Province === citySelect.value);
+                let district = city?.Districts.find(d => d.District === districtSelect.value);
+                if (district) {
+                    let [lat, lng] = district.Coordinates.split(",").map(Number);
+                    map.setView([lat, lng], 12);
+                    marker.setLatLng([lat, lng]);
+                }
+            });
+            </script>
+
+        <?php elseif ($tab == 'products'): ?>
+            <!-- PRODUCTS CONTENT -->
+            <div class="card" style="margin-bottom:20px;">
+                <div class="card-header">
+                    <h3>Add New Product</h3>
+                </div>
+                <div class="card-body">
+                    <form method="POST" enctype="multipart/form-data" style="display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
+                        <input type="hidden" name="add_product" value="1">
+                        
+                        <div style="flex:1; min-width:200px;">
+                            <label>Name</label><br>
+                            <input type="text" name="p_name" required class="form-control">
+                        </div>
+
+                        <div style="flex:1; min-width:150px;">
+                            <label>Category</label><br>
+                            <select name="p_category" required class="form-control">
+                                <option value="" disabled selected>Select...</option>
+                                <?php foreach($categoryList as $cat): ?>
+                                    <option value="<?= htmlspecialchars($cat) ?>"><?= htmlspecialchars($cat) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+
+                        <div style="flex:0 0 120px;">
+                            <label>Price</label><br>
+                            <input type="number" step="0.01" name="p_price" required class="form-control">
+                        </div>
+
+                        <div style="flex:1; min-width:200px;">
+                            <label>Photo</label><br>
+                            <input type="file" name="p_image" accept="image/*" class="form-control">
+                        </div>
+
+                        <div style="flex:2; min-width:300px;">
+                            <label>Description</label><br>
+                            <input type="text" name="p_description" class="form-control">
+                        </div>
+
+                        <div style="width:100%; margin-top:5px;">
+                            <input type="checkbox" id="neg" name="p_negotiable"> 
+                            <label for="neg">Price is Negotiable</label>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary" style="margin-top:10px;">
+                            <i class="fas fa-plus"></i> Add
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Product Catalog (Page <?= $prodPage ?> of <?= $totalProdPages ?: 1 ?>)</h3>
+                </div>
+                <div class="card-body">
+                    <table width="100%">
+                        <thead>
+                            <tr>
+                                <th width="80">Image</th>
+                                <th>Details</th>
+                                <th>Category</th>
+                                <th>Pricing</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if(empty($products)): ?>
+                                <tr><td colspan="5" style="text-align:center; padding:20px;">No products yet.</td></tr>
+                            <?php else: ?>
+                                <?php foreach ($products as $p): ?>
+                                <tr>
+                                    <td>
+                                        <?php if(!empty($p['image_url'])): ?>
+                                            <img src="<?= htmlspecialchars($p['image_url']) ?>" class="product-img-thumb" alt="Img">
+                                        <?php else: ?>
+                                            <div class="product-img-thumb" style="background:#eee; display:flex; align-items:center; justify-content:center; color:#999;"><i class="fas fa-image"></i></div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <strong><?= htmlspecialchars($p['name']) ?></strong><br>
+                                        <small style="color:#666;"><?= htmlspecialchars($p['description']) ?></small>
+                                    </td>
+                                    <td><span style="background:#eee; padding:3px 8px; border-radius:10px; font-size:0.8rem;"><?= htmlspecialchars($p['categories']) ?></span></td>
+                                    <td>
+                                        <form method="POST" style="display:flex; align-items:center; gap:5px;">
+                                            <input type="hidden" name="update_price" value="1">
+                                            <input type="hidden" name="product_id" value="<?= $p['id'] ?>">
+                                            <input type="number" step="0.01" name="new_price" value="<?= $p['product_prices'] ?>" style="width:70px; padding:4px; border:1px solid #ddd; border-radius:4px;">
+                                            <button type="submit" class="btn btn-success" style="padding:5px;"><i class="fas fa-check"></i></button>
+                                        </form>
+                                        <?php 
+                                            $isNeg = $p['is_negotiable'] ?? false; 
+                                            if($isNeg === true || $isNeg === 't' || $isNeg === 1): 
+                                        ?>
+                                            <small style="color:orange; display:block;"><i class="fas fa-handshake"></i> Negotiable</small>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <form method="POST" onsubmit="return confirm('Delete this product?');">
+                                            <input type="hidden" name="delete_product" value="1">
+                                            <input type="hidden" name="product_id" value="<?= $p['id'] ?>">
+                                            <button type="submit" class="btn btn-danger" style="padding:5px 10px;"><i class="fas fa-trash"></i></button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+
+                    <?php if ($totalProdPages > 1): ?>
+                    <div class="pagination">
+                        <?php 
+                        if($prodPage > 1) echo '<a href="?tab=products&prod_page='.($prodPage-1).'">&laquo; Prev</a>';
+                        for($i = 1; $i <= $totalProdPages; $i++) {
+                            $active = ($prodPage == $i) ? 'active' : '';
+                            echo '<a href="?tab=products&prod_page='.$i.'" class="'.$active.'">'.$i.'</a>';
+                        }
+                        if($prodPage < $totalProdPages) echo '<a href="?tab=products&prod_page='.($prodPage+1).'">Next &raquo;</a>';
+                        ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+        <?php elseif ($tab == 'reviews'): ?>
+            <!-- REVIEWS CONTENT -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Customer Reviews</h3>
+                </div>
+                <div class="card-body">
+                    <?php if(empty($reviews)): ?>
+                        <div style="text-align:center; padding:30px; color:#666;">No reviews yet.</div>
+                    <?php else: ?>
+                        <div style="display:flex; flex-direction:column; gap:20px;">
+                            <?php foreach ($reviews as $r): ?>
+                            <div style="border:1px solid #eee; padding:15px; border-radius:8px;">
+                                
+                                <div style="display:flex; justify-content:space-between;">
+                                    <strong><?= htmlspecialchars($r['full_name']) ?></strong>
+                                    <span style="color:#f1c40f;">
+                                        <?= str_repeat('★', $r['rank']) ?>
+                                    </span>
+                                </div>
+                                
+                                <p style="margin:10px 0; color:#444;"><?= nl2br(htmlspecialchars($r['comments'])) ?></p>
+                                
+                                <?php 
+                                    $isRevApproved = $r['is_approved'] ?? false;
+                                    if($isRevApproved != 't' && $isRevApproved !== true && $isRevApproved != 1): 
+                                ?>
+                                    <div style="background:#fff3cd; color:#856404; padding:5px; font-size:0.8rem; border-radius:3px; margin-bottom:10px;">
+                                        <i class="fas fa-clock"></i> This review is waiting for admin approval before going public.
+                                    </div>
+                                <?php endif; ?>
+
+                                <?php if (!empty($r['response_text'])): ?>
+                                    <div style="background:#f9f9f9; padding:10px; border-left:4px solid #3498db; margin-top:10px;">
+                                        <div style="display:flex; justify-content:space-between;">
+                                            <strong style="color:#2c3e50;"><i class="fas fa-reply"></i> Your Response:</strong>
+                                            <?php 
+                                                $isRespApproved = $r['resp_approved'] ?? false;
+                                                if($isRespApproved == 't' || $isRespApproved === true || $isRespApproved == 1): 
+                                            ?>
+                                                <span style="background:#d4edda; color:#155724; padding:2px 6px; font-size:0.7rem; border-radius:3px;">Live</span>
+                                            <?php else: ?>
+                                                <span style="background:#fff3cd; color:#856404; padding:2px 6px; font-size:0.7rem; border-radius:3px;">Pending Approval</span>
+                                            <?php endif; ?>
+                                        </div>
+                                        <p style="margin:5px 0; font-size:0.9rem;"><?= nl2br(htmlspecialchars($r['response_text'])) ?></p>
+                                    </div>
+                                <?php else: ?>
+                                    <div style="margin-top:10px; border-top:1px dashed #eee; padding-top:10px;">
+                                        <button onclick="document.getElementById('reply-form-<?= $r['review_id'] ?>').style.display='block'; this.style.display='none';" 
+                                                style="background:none; border:1px solid #3498db; color:#3498db; padding:5px 10px; border-radius:4px; cursor:pointer;">
+                                            Reply
+                                        </button>
+                                        <form id="reply-form-<?= $r['review_id'] ?>" method="POST" style="display:none; margin-top:10px;">
+                                            <input type="hidden" name="respond_to_review" value="1">
+                                            <input type="hidden" name="review_id" value="<?= $r['review_id'] ?>">
+                                            <textarea name="response_text" rows="3" required style="width:100%; padding:10px; border:1px solid #ddd;"></textarea>
+                                            <button type="submit" class="btn btn-primary" style="margin-top:5px;">Post Response</button>
+                                        </form>
+                                    </div>
+                                <?php endif; ?>
+
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+        <?php elseif ($tab == 'pricelist'): ?>
+            <!-- PRICELIST CONTENT -->
+            <div class="card">
+                <div class="card-header">
+                    <h3>Manage Price Lists</h3>
+                </div>
+                <div class="card-body">
+                    <div style="background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px dashed #ccc;">
+                        <form method="POST" enctype="multipart/form-data" style="display: flex; align-items: center; gap: 15px;">
+                            <input type="hidden" name="upload_pricelist" value="1">
+                            <div style="flex: 1;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Upload New Price List / Menu Image</label>
+                                <input type="file" name="pl_image" accept="image/*" required class="form-control" style="background: white;">
+                            </div>
+                            <button type="submit" class="btn btn-primary" style="height: 42px; margin-top: 18px;">
+                                <i class="fas fa-upload"></i> Upload
+                            </button>
+                        </form>
+                    </div>
+
+                    <h4 style="margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 10px;">Current Price Lists</h4>
+                    
+                    <?php if(empty($priceLists)): ?>
+                        <p style="color: #777; text-align: center; margin-top: 20px;">No price lists uploaded yet.</p>
+                    <?php else: ?>
+                        <div class="pl-grid">
+                            <?php foreach($priceLists as $pl): ?>
+                                <div class="pl-item">
+                                    <a href="<?= htmlspecialchars($pl['image_url']) ?>" target="_blank">
+                                        <img src="<?= htmlspecialchars($pl['image_url']) ?>" alt="Price List">
+                                    </a>
+                                    <div style="padding: 10px;">
+                                        <small style="color: #999; display: block; margin-bottom: 5px;"><?= date('M d, Y', strtotime($pl['created_at'])) ?></small>
+                                        <form method="POST" onsubmit="return confirm('Delete this price list?');">
+                                            <input type="hidden" name="delete_pricelist" value="1">
+                                            <input type="hidden" name="pl_id" value="<?= $pl['id'] ?>">
+                                            <button type="submit" class="btn btn-danger" style="width: 100%;">
+                                                Delete
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
     </div>
 </body>
 </html>
