@@ -238,3 +238,17 @@ CREATE TABLE business_favorites (
     CONSTRAINT fk_biz_fav_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
 );
 DROP TABLE IF EXISTS favorites;
+
+ALTER TABLE photos ADD COLUMN is_approved BOOLEAN DEFAULT FALSE;
+ALTER TABLE price_lists ADD COLUMN is_approved BOOLEAN DEFAULT FALSE;
+ALTER TABLE reviews ADD CONSTRAINT unique_user_business_review UNIQUE (user_id, business_id);
+ALTER TABLE business ADD COLUMN is_editors_choice BOOLEAN DEFAULT FALSE;
+
+CREATE TABLE business_photos (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER NOT NULL,
+    image_url VARCHAR(255) NOT NULL,
+    is_approved BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT fk_business_photos_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
