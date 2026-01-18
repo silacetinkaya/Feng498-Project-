@@ -252,3 +252,9 @@ CREATE TABLE business_photos (
     created_at TIMESTAMP DEFAULT NOW(),
     CONSTRAINT fk_business_photos_business FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
 );
+
+ALTER TABLE products
+ADD COLUMN original_price DECIMAL,
+ADD COLUMN discounted_price DECIMAL,
+ADD COLUMN discount_percent INT,
+ADD COLUMN is_discounted BOOLEAN DEFAULT FALSE;

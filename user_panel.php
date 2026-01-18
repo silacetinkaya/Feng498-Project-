@@ -12,6 +12,16 @@ if (!isset($_SESSION['user_id'])) {
 
 $userId = $_SESSION['user_id'];
 $tab = $_GET['tab'] ?? 'home';
+// --- Path helper (MAMP project folder uyumu için) ---
+$BASE = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+function asset($path) {
+    global $BASE;
+    if (empty($path)) return '';
+    return $BASE . '/' . ltrim((string)$path, '/');
+}
+function isTruePg($v) {
+    return $v === true || $v === 1 || $v === '1' || $v === 't' || $v === 'true';
+}
 
 /* =========================
    USER INFO
@@ -132,6 +142,37 @@ if ($tab === 'offers') {
     $stmt->execute([$userId]);
     $myOffers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+$discountProducts = [];
+if ($tab === 'discounts') {
+    $stmt = $pdo->prepare("
+        SELECT 
+            p.id AS product_id,
+            p.name AS product_name,
+            p.original_price,
+            p.discounted_price,
+            p.discount_percent,
+            b.shop_id,
+            b.name AS business_name,
+            b.category,
+            (
+              SELECT ph.image_url
+              FROM photos ph
+              WHERE ph.product_id = p.id
+                AND ph.is_approved = TRUE
+              ORDER BY ph.photo_id DESC
+              LIMIT 1
+            ) AS product_image
+        FROM products p
+        JOIN business b ON b.shop_id = p.business_id
+        WHERE p.is_discounted = TRUE
+          AND p.available = TRUE
+        ORDER BY p.discount_percent DESC NULLS LAST, p.id DESC
+        LIMIT 200
+    ");
+    $stmt->execute();
+    $discountProducts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
 
 if ($tab === 'messages') {
     $stmt = $pdo->prepare("SELECT DISTINCT b.name AS business_name, b.owner_id
@@ -491,12 +532,169 @@ if ($tab === 'editors_choice') {
 
             <?php elseif ($tab === 'messages'): ?>
 
-                <?php foreach ($myChats as $c): ?>
-                    <div class="card">
-                        <?= htmlspecialchars($c['business_name']) ?>
-                    </div>
-                <?php endforeach; ?>
-            <?php elseif ($tab === 'editors_choice'): ?>
+<div style="display:flex; gap:16px;">
+
+  <!-- LEFT: CHAT LIST -->
+  <div class="card" style="flex:0 0 320px; max-height:650px; overflow:auto;">
+    <h3 style="margin-top:0;">Messages</h3>
+    <div id="chatList" style="display:flex; flex-direction:column; gap:10px;"></div>
+  </div>
+
+  <!-- RIGHT: CHAT VIEW -->
+  <div class="card" style="flex:1; display:flex; flex-direction:column; min-height:650px;">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <h3 id="chatTitle" style="margin:0;">Select a chat</h3>
+      <span id="chatMeta" style="color:#777;"></span>
+    </div>
+
+    <div id="msgBox" style="flex:1; margin-top:12px; padding:12px; border:1px solid #eee; border-radius:12px; background:#fafafa; overflow:auto;">
+      <div style="color:#777;">No chat selected.</div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:12px;">
+      <input id="msgInput" class="form-control" type="text" placeholder="Type a message..." style="flex:1;" disabled>
+      <button id="sendBtn" class="btn btn-primary" disabled>Send</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let currentChatId = null;
+let pollTimer = null;
+
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+async function loadChats(){
+  const res = await fetch('chat_list.php');
+  const data = await res.json();
+  const list = document.getElementById('chatList');
+  list.innerHTML = '';
+
+  if (!data.chats || data.chats.length === 0){
+    list.innerHTML = '<div style="color:#777; padding:8px;">No chats yet.</div>';
+    return data;
+  }
+
+  data.chats.forEach(c => {
+    const unread = parseInt(c.unread_count || 0, 10);
+    const last = c.last_message ? esc(c.last_message) : '<span style="color:#aaa;">No messages</span>';
+
+    const item = document.createElement('div');
+    item.style.border = '1px solid #eee';
+    item.style.borderRadius = '12px';
+    item.style.padding = '10px';
+    item.style.cursor = 'pointer';
+    item.style.background = (currentChatId == c.chat_id) ? '#f1f7ff' : '#fff';
+
+    item.innerHTML = `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <div style="font-weight:800;">${esc(c.business_name)}</div>
+        ${unread>0 ? `<div style="background:#e53935;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;font-weight:800;">${unread}</div>` : ``}
+      </div>
+      <div style="color:#666; margin-top:6px; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${last}</div>
+    `;
+
+    item.onclick = () => openChat(c.chat_id, c.business_name);
+    list.appendChild(item);
+  });
+   return data; 
+}
+
+async function openChat(chatId, businessName){
+  currentChatId = chatId;
+  document.getElementById('chatTitle').textContent = businessName;
+  document.getElementById('msgInput').disabled = false;
+  document.getElementById('sendBtn').disabled = false;
+
+  await loadMessages();
+  await loadChats();
+
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(loadMessages, 2500);
+}
+
+async function loadMessages(){
+  if (!currentChatId) return;
+
+  const res = await fetch('chat_fetch_messages.php?chat_id=' + encodeURIComponent(currentChatId));
+  const data = await res.json();
+
+  const box = document.getElementById('msgBox');
+  box.innerHTML = '';
+
+  (data.messages || []).forEach(m => {
+    const mine = (m.sender_type === 'user');
+    const bubble = document.createElement('div');
+    bubble.style.maxWidth = '75%';
+    bubble.style.margin = mine ? '8px 0 8px auto' : '8px auto 8px 0';
+    bubble.style.padding = '10px 12px';
+    bubble.style.borderRadius = '14px';
+    bubble.style.background = mine ? '#dff0ff' : '#ffffff';
+    bubble.style.border = '1px solid #e6e6e6';
+    bubble.innerHTML = `<div style="white-space:pre-wrap;">${esc(m.content)}</div>
+                        <div style="margin-top:6px;color:#999;font-size:12px;">${esc(m.created_at)}</div>`;
+    box.appendChild(bubble);
+  });
+
+  box.scrollTop = box.scrollHeight;
+}
+
+async function sendMessage(){
+  if (!currentChatId) return;
+
+  const inp = document.getElementById('msgInput');
+  const content = inp.value.trim();
+  if (!content) return;
+
+  inp.value = '';
+  inp.focus();
+
+  const res = await fetch('chat_send_message.php', {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'chat_id=' + encodeURIComponent(currentChatId) + '&content=' + encodeURIComponent(content)
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    alert('Mesaj gönderilemedi. (HTTP ' + res.status + ')\n' + txt);
+    return;
+  }
+
+  await loadMessages();
+  await loadChats();
+}
+
+document.getElementById('sendBtn').addEventListener('click', sendMessage);
+document.getElementById('msgInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+
+
+
+// Auto-open chat if chat_id exists in URL
+const openId = new URLSearchParams(window.location.search).get('chat_id');
+
+(async () => {
+  await loadChats();
+
+  if (openId) {
+    const res = await fetch('chat_list.php');
+    const data = await res.json();
+    const found = (data.chats || []).find(x => String(x.chat_id) === String(openId));
+    if (found) openChat(found.chat_id, found.business_name);
+  }
+})();
+
+
+</script>
+
+<?php elseif ($tab === 'editors_choice'): ?>
 
                 <div class="card">
                     <h2 style="color: #e53935; margin-bottom: 30px;">
@@ -541,6 +739,14 @@ if ($tab === 'editors_choice') {
                                         style="display: block; text-align: center; background: #e53935; color: white; padding: 10px; border-radius: 8px; text-decoration: none; font-weight: 600; margin-top: 15px;">
                                         View Details <i class="fas fa-arrow-right"></i>
                                     </a>
+                                 <a href="chat_start.php?business_id=<?= (int)$businessId ?>" target="_top" style="text-decoration:none;">
+
+  <button style="background:#3498db; color:white; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700;">
+    💬 Message
+  </button>
+</a>
+
+
                                 </div>
                             <?php endforeach; ?>
                         </div>
@@ -548,11 +754,64 @@ if ($tab === 'editors_choice') {
                 </div>
             <?php elseif ($tab === 'discounts'): ?>
 
-                <div class="card">
-                    <h3>Special Discounts</h3>
-                    <p style="color: #666; text-align: center; padding: 40px;">Coming soon...</p>
+    <div class="card">
+        <h3 style="margin-top:0;">Special Discounts</h3>
+
+        <?php if (empty($discountProducts)): ?>
+            <p style="color:#666; text-align:center; padding:30px;">No discounted products yet.</p>
+        <?php else: ?>
+            <?php foreach ($discountProducts as $p): ?>
+                <div style="display:flex; gap:15px; align-items:center; padding:15px 0; border-bottom:1px solid #eee;">
+
+                    <div style="width:90px; height:90px; border-radius:12px; overflow:hidden; border:1px solid #ddd; background:#f7f7f7; display:flex; align-items:center; justify-content:center;">
+                        <?php if (!empty($p['product_image'])): ?>
+                            <img src="<?= htmlspecialchars(asset($p['product_image'])) ?>" style="width:100%; height:100%; object-fit:cover;">
+                        <?php else: ?>
+                            <span style="color:#999;">No Image</span>
+                        <?php endif; ?>
+                    </div>
+
+                    <div style="flex:1;">
+                        <div style="font-weight:900; font-size:1.05rem;">
+                            <?= htmlspecialchars($p['product_name']) ?>
+                        </div>
+
+                        <div style="color:#666; margin-top:4px;">
+                            <?= htmlspecialchars($p['business_name']) ?> • <?= htmlspecialchars($p['category'] ?? '') ?>
+                        </div>
+
+                        <div style="margin-top:6px;">
+                            <span style="text-decoration:line-through; color:#999; margin-right:8px;">
+                                <?= number_format((float)($p['original_price'] ?? 0), 2) ?> TL
+                            </span>
+
+                            <span style="font-weight:900; font-size:1.1rem;">
+                                <?= number_format((float)($p['discounted_price'] ?? 0), 2) ?> TL
+                            </span>
+
+                            <?php if (!empty($p['discount_percent'])): ?>
+                                <span style="margin-left:10px; background:#e53935; color:#fff; padding:3px 10px; border-radius:999px; font-size:0.85rem; font-weight:700;">
+                                    -<?= (int)$p['discount_percent'] ?>%
+                                </span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <div>
+                        <a href="business_detail.php?id=<?= (int)$p['shop_id'] ?>" style="text-decoration:none;">
+                            <button class="btn btn-primary" style="padding:10px 14px;">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                        </a>
+                    </div>
+
                 </div>
-            <?php endif; ?>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+
+<?php endif; ?>
+
 
         </main>
     </div>
