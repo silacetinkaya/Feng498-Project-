@@ -110,7 +110,7 @@ if (isset($_POST['add_product'])) {
     try {
         $pdo->beginTransaction();
 
-        $negotiable = isset($_POST['p_negotiable']) ? 't' : 'f';
+        $negotiable  = isset($_POST['p_negotiable']);
         // Base price
         $price = (float)($_POST['p_price'] ?? 0);
         if ($price <= 0) {
@@ -118,7 +118,8 @@ if (isset($_POST['add_product'])) {
         }
 
         // Discount logic
-        $isDiscounted = isset($_POST['is_discounted']);
+        $isDiscounted = isset($_POST['is_discounted']); // boolean true/false
+
         $discountPercent = null;
         $discountedPrice = null;
         $originalPrice = $price;
@@ -157,6 +158,8 @@ if (isset($_POST['add_product'])) {
             VALUES (?, ?, ?, ?, ?, true, ?, ?, ?, ?)
             RETURNING id
         ");
+        $isDiscountedDb = $isDiscounted ? 'true' : 'false';
+
         $ins->execute([
             $businessId,
             $_POST['p_name'],
@@ -166,7 +169,7 @@ if (isset($_POST['add_product'])) {
             $originalPrice,
             $discountedPrice,
             $discountPercent,
-            $isDiscounted ? true : false
+            $isDiscountedDb
         ]);
         $newProdId = $ins->fetchColumn();
 
@@ -175,7 +178,10 @@ if (isset($_POST['add_product'])) {
             INSERT INTO product_prices (product_id, price, is_negotiable, updated_at)
             VALUES (?, ?, ?, NOW())
         ");
-        $insPrice->execute([$newProdId, $currentPrice, $negotiable]);
+        $negotiableDb = $negotiable ? 'true' : 'false';
+        $insPrice->execute([$newProdId, $currentPrice, $negotiableDb]);
+
+        
 
         // Save image
         if (isset($_FILES['p_image']) && $_FILES['p_image']['error'] === UPLOAD_ERR_OK) {
@@ -412,6 +418,25 @@ $stmtRev->execute([$businessId]);
 $reviews = $stmtRev->fetchAll(PDO::FETCH_ASSOC);
 
 /* ----------------------------
+   OFFERS (Business side)
+----------------------------- */
+$stmtOffers = $pdo->prepare("
+  SELECT 
+    o.*,
+    u.full_name AS user_name,
+    p.name AS product_name
+  FROM offers o
+  JOIN users u ON u.id = o.user_id
+  LEFT JOIN products p ON p.id = o.product_id
+  WHERE o.business_id = ?
+  ORDER BY o.created_time DESC
+");
+$stmtOffers->execute([$businessId]);
+$offers = $stmtOffers->fetchAll(PDO::FETCH_ASSOC);
+
+
+
+/* ----------------------------
    HOURS
 ----------------------------- */
 $days = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
@@ -514,6 +539,7 @@ $categories = [
             <li><a href="?tab=reviews" class="<?php echo $tab=='reviews'?'active':''; ?>"><i class="fas fa-star"></i> Reviews</a></li>
             <li><a href="?tab=pricelist" class="<?php echo $tab=='pricelist'?'active':''; ?>"><i class="fas fa-file-invoice-dollar"></i> Price Lists</a></li>
             <li><a href="?tab=messages" class="<?php echo $tab=='messages'?'active':''; ?>"><i class="fas fa-comments"></i> Messages</a></li>
+            <li> <a href="?tab=offers" class="<?php echo $tab=='offers'?'active':''; ?>"> <i class="fas fa-hand-holding-usd"></i> Offers</a></li>
         </ul>
         <div class="logout-section">
             <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -832,7 +858,7 @@ $categories = [
                         </div>
                         <!-- DISCOUNT -->
 <div style="width:100%; margin-top:8px;">
-    <input type="checkbox" id="is_discounted" name="is_discounted" onchange="toggleDiscountFields(this.checked)">
+    <input type="checkbox" id="is_discounted" name="is_discounted" value="1" onchange="toggleDiscountFields(this.checked)">
     <label for="is_discounted"><b>Discount</b></label>
 </div>
 
@@ -871,7 +897,7 @@ function toggleDiscountFields(on){
 
 
                         <div style="width:100%; margin-top:5px;">
-                            <input type="checkbox" id="neg" name="p_negotiable"> 
+                            <input type="checkbox" id="neg" name="p_negotiable" value="1"> 
                             <label for="neg">Price is Negotiable</label>
                         </div>
                         
@@ -1155,7 +1181,82 @@ function toggleDiscountFields(on){
     };
 
     loadBizChats();
+
     </script>
+
+    <?php elseif ($tab == 'offers'): ?>
+  <div class="card">
+    <div class="card-header">
+      <h3>Offers</h3>
+    </div>
+    <div class="card-body">
+
+      <?php if (empty($offers)): ?>
+        <p style="color:#777; text-align:center;">No offers yet.</p>
+      <?php else: ?>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <?php foreach ($offers as $o): ?>
+            <div style="border:1px solid #eee; border-radius:12px; padding:14px; background:#fff;">
+              <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+                <div>
+                  <div style="font-weight:800;">
+                    Offer #<?= (int)$o['id'] ?> — <?= htmlspecialchars($o['user_name'] ?? 'User') ?>
+                  </div>
+                  <div style="margin-top:4px; color:#444;">
+                    Product: <b><?= htmlspecialchars($o['product_name'] ?? ('#'.$o['product_id'])) ?></b>
+                  </div>
+                  <div style="margin-top:4px;">
+                    Offered: <b><?= number_format((float)$o['offered_price'], 2) ?> TL</b>
+                    <span style="margin-left:10px; color:#999;">
+                      (<?= htmlspecialchars($o['status']) ?>)
+                    </span>
+                  </div>
+                  <?php if (!empty($o['note'])): ?>
+                    <div style="margin-top:6px; color:#666;">
+                      Note: <?= htmlspecialchars($o['note']) ?>
+                    </div>
+                  <?php endif; ?>
+                </div>
+
+                <?php if (($o['status'] ?? '') === 'pending'): ?>
+                  <div style="display:flex; gap:8px;">
+                    <form method="POST" action="offer_update.php" style="margin:0;">
+                      <input type="hidden" name="offer_id" value="<?= (int)$o['id'] ?>">
+                      <input type="hidden" name="action" value="accept">
+                      <button type="submit" class="btn btn-success">Accept</button>
+                    </form>
+
+                    <form method="POST" action="offer_update.php" style="margin:0;">
+                      <input type="hidden" name="offer_id" value="<?= (int)$o['id'] ?>">
+                      <input type="hidden" name="action" value="reject">
+                      <button type="submit" class="btn btn-danger">Reject</button>
+                    </form>
+                  </div>
+                <?php endif; ?>
+              </div>
+
+              <?php if (($o['status'] ?? '') === 'pending'): ?>
+                <div style="margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
+                  <form method="POST" action="offer_update.php" style="display:flex; gap:10px; align-items:center; margin:0;">
+                    <input type="hidden" name="offer_id" value="<?= (int)$o['id'] ?>">
+                    <input type="hidden" name="action" value="counter">
+                    <input type="number" step="0.01" min="0" name="counter_price"
+                           class="form-control"
+                           placeholder="Counter price (TL)" required
+                           style="max-width:220px;">
+                    <button type="submit" class="btn btn-primary">Counter</button>
+                  </form>
+                </div>
+              <?php endif; ?>
+
+            </div>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+
+    </div>
+  </div>
+
 <?php endif; ?>
 
     </div>

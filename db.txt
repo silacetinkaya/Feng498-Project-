@@ -258,3 +258,15 @@ ADD COLUMN original_price DECIMAL,
 ADD COLUMN discounted_price DECIMAL,
 ADD COLUMN discount_percent INT,
 ADD COLUMN is_discounted BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE offers ADD COLUMN product_id INTEGER;
+ALTER TABLE offers ADD CONSTRAINT fk_offers_product
+FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE;
+
+ALTER TABLE offers ADD COLUMN note TEXT;
+
+ALTER TABLE offers ADD COLUMN counter_price DECIMAL;
+
+ALTER TABLE offers ALTER COLUMN status SET DEFAULT 'pending';
+UPDATE offers SET status='pending' WHERE status IS NULL;
+
