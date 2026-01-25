@@ -1,100 +1,89 @@
 <?php
+// offer_update.php
 session_start();
 require_once 'db_connect.php';
 
+// Business login kontrolü
 if (!isset($_SESSION['user_id'])) {
-  header("Location: business.html");
+  // form submit olduğu için JSON yerine login sayfasına atmak daha mantıklı
+  header("Location: business.html?error=login_required");
   exit;
 }
 
 $ownerId = (int)$_SESSION['user_id'];
 
-// Owner'ın business'ını bul
-$stmtB = $pdo->prepare("SELECT shop_id FROM business WHERE owner_id = ? LIMIT 1");
-$stmtB->execute([$ownerId]);
-$bizId = (int)($stmtB->fetchColumn() ?: 0);
+// Bu owner'ın business'ını bul
+$stmtBiz = $pdo->prepare("SELECT shop_id FROM business WHERE owner_id = ? LIMIT 1");
+$stmtBiz->execute([$ownerId]);
+$businessId = (int)($stmtBiz->fetchColumn() ?: 0);
 
-if ($bizId <= 0) {
+if ($businessId <= 0) {
   header("Location: business_dashboard.php?tab=offers&err=no_business");
   exit;
 }
 
 $offerId = (int)($_POST['offer_id'] ?? 0);
 $action  = trim($_POST['action'] ?? '');
+$counter = (float)($_POST['counter_price'] ?? 0);
 
 if ($offerId <= 0 || !in_array($action, ['accept','reject','counter'], true)) {
   header("Location: business_dashboard.php?tab=offers&err=bad_request");
   exit;
 }
 
+// Offer bu business'a mı ait?
+$stmt = $pdo->prepare("SELECT id, chat_id, product_id, offered_price, status FROM offers WHERE id=? AND business_id=? LIMIT 1");
+$stmt->execute([$offerId, $businessId]);
+$o = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$o) {
+  header("Location: business_dashboard.php?tab=offers&err=offer_not_found");
+  exit;
+}
+
+$chatId = (int)$o['chat_id'];
+
 try {
   $pdo->beginTransaction();
 
-  // Offer gerçekten bu business'a mı ait?
-  $stmtO = $pdo->prepare("
-    SELECT id, chat_id, product_id, user_id, offered_price, status
-    FROM offers
-    WHERE id = ? AND business_id = ?
-    LIMIT 1
-  ");
-  $stmtO->execute([$offerId, $bizId]);
-  $offer = $stmtO->fetch(PDO::FETCH_ASSOC);
-
-  if (!$offer) {
-    $pdo->rollBack();
-    header("Location: business_dashboard.php?tab=offers&err=offer_not_found");
-    exit;
-  }
-
-  $chatId    = (int)($offer['chat_id'] ?? 0);
-  $userId    = (int)($offer['user_id'] ?? 0);
-  $productId = (int)($offer['product_id'] ?? 0);
-
   if ($action === 'accept') {
-    $pdo->prepare("UPDATE offers SET status='accepted' WHERE id=? AND business_id=?")
-        ->execute([$offerId, $bizId]);
+    $upd = $pdo->prepare("UPDATE offers SET status='accepted' WHERE id=? AND business_id=?");
+    $upd->execute([$offerId, $businessId]);
 
-    $msgText = "✅ OFFER #{$offerId} accepted.";
-  }
+    $msg = "✅ OFFER #{$offerId} accepted.";
 
-  if ($action === 'reject') {
-    $pdo->prepare("UPDATE offers SET status='rejected' WHERE id=? AND business_id=?")
-        ->execute([$offerId, $bizId]);
+  } elseif ($action === 'reject') {
+    $upd = $pdo->prepare("UPDATE offers SET status='rejected' WHERE id=? AND business_id=?");
+    $upd->execute([$offerId, $businessId]);
 
-    $msgText = "❌ OFFER #{$offerId} rejected.";
-  }
+    $msg = "❌ OFFER #{$offerId} rejected.";
 
-  if ($action === 'counter') {
-    $counter = (float)($_POST['counter_price'] ?? 0);
+  } else { // counter
     if ($counter <= 0) {
-      $pdo->rollBack();
-      header("Location: business_dashboard.php?tab=offers&err=bad_counter");
-      exit;
+      throw new Exception("counter_price_invalid");
     }
 
-    // İstersen status 'countered' yap, istersen 'pending' bırak.
-    $pdo->prepare("UPDATE offers SET status='countered', offered_price=? WHERE id=? AND business_id=?")
-        ->execute([$counter, $offerId, $bizId]);
+    $upd = $pdo->prepare("UPDATE offers SET status='countered', offered_price=? WHERE id=? AND business_id=?");
+    $upd->execute([$counter, $offerId, $businessId]);
 
-    $msgText = "🔁 COUNTER for OFFER #{$offerId}: " . number_format($counter, 2) . " TL";
+    $msg = "🔁 COUNTER for OFFER #{$offerId}: " . number_format($counter, 2) . " TL";
   }
 
-  // Mesaj olarak chat'e düşsün (user görsün)
-  if ($chatId > 0) {
-    $insMsg = $pdo->prepare("
-      INSERT INTO messages (chat_id, sender_type, sender_ref_id, content, created_at, is_read)
-      VALUES (?, 'business', ?, ?, NOW(), FALSE)
-    ");
-    $insMsg->execute([$chatId, $ownerId, $msgText]);
-  }
+  // Mesajı chat'e düş (business tarafı)
+  // (messages şeman sende nullable olduğu için bu insert rahat)
+  $insMsg = $pdo->prepare("
+    INSERT INTO messages (chat_id, sender_type, sender_ref_id, owner_id, content, created_at)
+    VALUES (?, 'business', ?, ?, ?, NOW())
+  ");
+  $insMsg->execute([$chatId, $businessId, $ownerId, $msg]);
 
   $pdo->commit();
 
-  header("Location: business_dashboard.php?tab=offers&ok=1");
+  header("Location: business_dashboard.php?tab=offers&msg=updated");
   exit;
 
 } catch (Exception $e) {
   if ($pdo->inTransaction()) $pdo->rollBack();
-  header("Location: business_dashboard.php?tab=offers&err=server");
+  header("Location: business_dashboard.php?tab=offers&err=" . urlencode($e->getMessage()));
   exit;
 }

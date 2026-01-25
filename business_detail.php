@@ -327,14 +327,16 @@ L.marker([<?= $lat ?>, <?= $lng ?>]).addTo(map);
                     <?php endif; ?>
 
                     <?php if (isset($_SESSION['user_id']) && $isNegotiable && $basePrice > 0): ?>
-                        <button class="offer-btn"
-                            data-product-id="<?= (int)$p['id'] ?>"
-                            data-business-id="<?= (int)$businessId ?>"
-                            data-product-name="<?= htmlspecialchars($p['name'] ?? '', ENT_QUOTES) ?>"
-                            data-base-price="<?= $basePrice ?>"
-                            style="margin-top:8px; background:#e53935; color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:700;">
-                            💸 Make Offer
-                        </button>
+                        <button type="button" class="offer-btn"
+                          data-product-id="<?= (int)$p['id'] ?>"
+                          data-business-id="<?= (int)$businessId ?>"
+                         data-product-name="<?= htmlspecialchars($p['name'] ?? '', ENT_QUOTES) ?>"
+                          data-base-price="<?= $basePrice ?>"
+                         style="margin-top:8px; background:#e53935; color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:700;">
+                          💸 Make Offer
+                      </button>
+
+                        
                     <?php endif; ?>
                 </div>
             </div>

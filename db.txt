@@ -270,3 +270,204 @@ ALTER TABLE offers ADD COLUMN counter_price DECIMAL;
 ALTER TABLE offers ALTER COLUMN status SET DEFAULT 'pending';
 UPDATE offers SET status='pending' WHERE status IS NULL;
 
+WITH ranked AS (
+  SELECT
+    id,
+    business_id,
+    user_id,
+    MAX(id) OVER (PARTITION BY business_id, user_id) AS keep_id,
+    ROW_NUMBER() OVER (PARTITION BY business_id, user_id ORDER BY id DESC) AS rn
+  FROM chats
+)
+UPDATE messages m
+SET chat_id = r.keep_id
+FROM ranked r
+WHERE m.chat_id = r.id AND r.rn > 1;
+
+WITH ranked AS (
+  SELECT
+    id,
+    business_id,
+    user_id,
+    MAX(id) OVER (PARTITION BY business_id, user_id) AS keep_id,
+    ROW_NUMBER() OVER (PARTITION BY business_id, user_id ORDER BY id DESC) AS rn
+  FROM chats
+)
+UPDATE offers o
+SET chat_id = r.keep_id
+FROM ranked r
+WHERE o.chat_id = r.id AND r.rn > 1;
+
+WITH ranked AS (
+  SELECT
+    id,
+    ROW_NUMBER() OVER (PARTITION BY business_id, user_id ORDER BY id DESC) AS rn
+  FROM chats
+)
+DELETE FROM chats c
+USING ranked r
+WHERE c.id = r.id AND r.rn > 1;
+ALTER TABLE chats
+ADD CONSTRAINT unique_chat_pair UNIQUE (business_id, user_id);
+-- OFFERS: product_id / note / counter_price garanti
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS product_id INTEGER;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS note TEXT;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS counter_price DECIMAL;
+
+-- FK (yoksa ekle)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_offers_product'
+  ) THEN
+    ALTER TABLE offers
+      ADD CONSTRAINT fk_offers_product
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE;
+  END IF;
+END$$;
+
+-- OFFERS status default
+ALTER TABLE offers ALTER COLUMN status SET DEFAULT 'pending';
+UPDATE offers SET status='pending' WHERE status IS NULL;
+
+-- MESSAGES: chat-based mesajlaşma kolonları garanti
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS chat_id INTEGER;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_type VARCHAR(20);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_ref_id INTEGER;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
+
+-- messages.chat_id FK (yoksa ekle)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_messages_chat'
+  ) THEN
+    ALTER TABLE messages
+      ADD CONSTRAINT fk_messages_chat
+      FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
+  END IF;
+END$$;
+
+-- Index (performans)
+CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+CREATE INDEX IF NOT EXISTS idx_offers_chat_id ON offers(chat_id);
+
+-- ==============================
+-- ADS (Bronze / Silver / Gold)
+-- PostgreSQL
+-- ==============================
+
+-- 1) Paketler
+CREATE TABLE IF NOT EXISTS ad_packages (
+  id              SERIAL PRIMARY KEY,
+  code            VARCHAR(20) NOT NULL UNIQUE,     -- BRONZE / SILVER / GOLD
+  name            VARCHAR(50) NOT NULL,            -- Bronze / Silver / Gold
+  monthly_price   NUMERIC(10,2) NOT NULL DEFAULT 0,
+  daily_user_cap  INT NOT NULL DEFAULT 3,          -- user başına günlük max gösterim
+  priority_weight INT NOT NULL DEFAULT 1,          -- Gold daha yüksek
+  show_home       BOOLEAN NOT NULL DEFAULT TRUE,   -- Bronze+
+  show_search     BOOLEAN NOT NULL DEFAULT FALSE,  -- Silver+
+  show_map        BOOLEAN NOT NULL DEFAULT FALSE,  -- Gold+
+  is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- updated_at otomatik güncellensin (trigger’sız basit kullanım için biz update’lerde set edeceğiz)
+-- istersen trigger da ekleriz ama şart değil.
+
+-- 2) Abonelik (işletmenin satın aldığı paket)
+CREATE TABLE IF NOT EXISTS ad_subscriptions (
+  id           SERIAL PRIMARY KEY,
+  business_id  INTEGER NOT NULL,
+  package_id   INTEGER NOT NULL,
+  status       VARCHAR(20) NOT NULL DEFAULT 'active', -- active/expired/cancelled
+  starts_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+  ends_at      TIMESTAMP NOT NULL,
+  created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT fk_ad_sub_business
+    FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+  CONSTRAINT fk_ad_sub_package
+    FOREIGN KEY (package_id) REFERENCES ad_packages(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ad_sub_business ON ad_subscriptions(business_id);
+CREATE INDEX IF NOT EXISTS idx_ad_sub_status_end ON ad_subscriptions(status, ends_at);
+
+-- 3) Gösterimler (daily cap = 3 için)
+CREATE TABLE IF NOT EXISTS ad_impressions (
+  id              BIGSERIAL PRIMARY KEY,
+  subscription_id INTEGER NOT NULL,
+  business_id     INTEGER NOT NULL,
+  user_id         INTEGER NOT NULL,
+  impression_date DATE NOT NULL DEFAULT CURRENT_DATE,  -- gün bazlı limit
+  placement       VARCHAR(10) NOT NULL,                -- home/search/map
+  cnt             INT NOT NULL DEFAULT 0,
+  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT fk_imp_sub
+    FOREIGN KEY (subscription_id) REFERENCES ad_subscriptions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_imp_business
+    FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+  CONSTRAINT fk_imp_user
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+
+  CONSTRAINT ck_imp_placement CHECK (placement IN ('home','search','map')),
+  CONSTRAINT uq_imp UNIQUE (subscription_id, user_id, impression_date, placement)
+);
+
+CREATE INDEX IF NOT EXISTS idx_imp_business_date ON ad_impressions(business_id, impression_date);
+CREATE INDEX IF NOT EXISTS idx_imp_user_date ON ad_impressions(user_id, impression_date);
+
+-- 4) Tıklamalar (opsiyonel ama çok iyi durur)
+CREATE TABLE IF NOT EXISTS ad_clicks (
+  id              BIGSERIAL PRIMARY KEY,
+  subscription_id INTEGER NOT NULL,
+  business_id     INTEGER NOT NULL,
+  user_id         INTEGER NOT NULL,
+  placement       VARCHAR(10) NOT NULL,
+  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT fk_click_sub
+    FOREIGN KEY (subscription_id) REFERENCES ad_subscriptions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_click_business
+    FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+  CONSTRAINT fk_click_user
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+
+  CONSTRAINT ck_click_placement CHECK (placement IN ('home','search','map'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_click_business ON ad_clicks(business_id);
+CREATE INDEX IF NOT EXISTS idx_click_user ON ad_clicks(user_id);
+
+-- 5) Paket seed (Bronze / Silver / Gold)
+INSERT INTO ad_packages (code, name, monthly_price, daily_user_cap, priority_weight, show_home, show_search, show_map)
+VALUES
+  ('BRONZE', 'Bronze', 199.00, 3, 1, TRUE,  FALSE, FALSE),
+  ('SILVER', 'Silver', 399.00, 3, 2, TRUE,  TRUE,  FALSE),
+  ('GOLD',   'Gold',   699.00, 3, 3, TRUE,  TRUE,  TRUE)
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name,
+  monthly_price = EXCLUDED.monthly_price,
+  daily_user_cap = EXCLUDED.daily_user_cap,
+  priority_weight = EXCLUDED.priority_weight,
+  show_home = EXCLUDED.show_home,
+  show_search = EXCLUDED.show_search,
+  show_map = EXCLUDED.show_map,
+  is_active = TRUE,
+  updated_at = NOW();
+
+-- ==============================
+-- Gösterim sayma (daily cap için)
+-- ==============================
+-- Örnek kullanım:
+-- INSERT INTO ad_impressions (subscription_id,business_id,user_id,impression_date,placement,cnt)
+-- VALUES ($1,$2,$3,CURRENT_DATE,'home',1)
+-- ON CONFLICT (subscription_id,user_id,impression_date,placement)
+-- DO UPDATE SET cnt = ad_impressions.cnt + 1, updated_at = NOW();
+

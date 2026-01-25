@@ -1183,14 +1183,13 @@ function toggleDiscountFields(on){
     loadBizChats();
 
     </script>
-
     <?php elseif ($tab == 'offers'): ?>
   <div class="card">
     <div class="card-header">
       <h3>Offers</h3>
     </div>
-    <div class="card-body">
 
+    <div class="card-body">
       <?php if (empty($offers)): ?>
         <p style="color:#777; text-align:center;">No offers yet.</p>
       <?php else: ?>
@@ -1202,15 +1201,18 @@ function toggleDiscountFields(on){
                   <div style="font-weight:800;">
                     Offer #<?= (int)$o['id'] ?> — <?= htmlspecialchars($o['user_name'] ?? 'User') ?>
                   </div>
+
                   <div style="margin-top:4px; color:#444;">
                     Product: <b><?= htmlspecialchars($o['product_name'] ?? ('#'.$o['product_id'])) ?></b>
                   </div>
+
                   <div style="margin-top:4px;">
                     Offered: <b><?= number_format((float)$o['offered_price'], 2) ?> TL</b>
                     <span style="margin-left:10px; color:#999;">
                       (<?= htmlspecialchars($o['status']) ?>)
                     </span>
                   </div>
+
                   <?php if (!empty($o['note'])): ?>
                     <div style="margin-top:6px; color:#666;">
                       Note: <?= htmlspecialchars($o['note']) ?>
@@ -1220,32 +1222,38 @@ function toggleDiscountFields(on){
 
                 <?php if (($o['status'] ?? '') === 'pending'): ?>
                   <div style="display:flex; gap:8px;">
-                    <form method="POST" action="offer_update.php" style="margin:0;">
-                      <input type="hidden" name="offer_id" value="<?= (int)$o['id'] ?>">
-                      <input type="hidden" name="action" value="accept">
-                      <button type="submit" class="btn btn-success">Accept</button>
-                    </form>
+                    <button type="button"
+                            class="btn btn-success"
+                            onclick="acceptOffer(<?= (int)$o['id'] ?>)">
+                      Accept
+                    </button>
 
-                    <form method="POST" action="offer_update.php" style="margin:0;">
-                      <input type="hidden" name="offer_id" value="<?= (int)$o['id'] ?>">
-                      <input type="hidden" name="action" value="reject">
-                      <button type="submit" class="btn btn-danger">Reject</button>
-                    </form>
+                    <button type="button"
+                            class="btn btn-danger"
+                            onclick="rejectOffer(<?= (int)$o['id'] ?>)">
+                      Reject
+                    </button>
                   </div>
                 <?php endif; ?>
               </div>
 
               <?php if (($o['status'] ?? '') === 'pending'): ?>
                 <div style="margin-top:10px; border-top:1px solid #eee; padding-top:10px;">
-                  <form method="POST" action="offer_update.php" style="display:flex; gap:10px; align-items:center; margin:0;">
-                    <input type="hidden" name="offer_id" value="<?= (int)$o['id'] ?>">
-                    <input type="hidden" name="action" value="counter">
-                    <input type="number" step="0.01" min="0" name="counter_price"
+                  <div style="display:flex; gap:10px; align-items:center;">
+                    <input id="counter_<?= (int)$o['id'] ?>"
+                           type="number"
+                           step="0.01"
+                           min="0"
                            class="form-control"
-                           placeholder="Counter price (TL)" required
+                           placeholder="Counter price (TL)"
                            style="max-width:220px;">
-                    <button type="submit" class="btn btn-primary">Counter</button>
-                  </form>
+
+                    <button type="button"
+                            class="btn btn-primary"
+                            onclick="counterOffer(<?= (int)$o['id'] ?>)">
+                      Counter
+                    </button>
+                  </div>
                 </div>
               <?php endif; ?>
 
@@ -1253,12 +1261,55 @@ function toggleDiscountFields(on){
           <?php endforeach; ?>
         </div>
       <?php endif; ?>
-
     </div>
   </div>
 
+  <script>
+    async function postOfferAction(action, offerId, counterPrice=null){
+      const fd = new FormData();
+      fd.append('action', action);
+      fd.append('offer_id', offerId);
+      if(counterPrice !== null) fd.append('counter_price', counterPrice);
+
+      const res = await fetch('offer_action.php', {
+        method: 'POST',
+        body: fd,
+        credentials: 'include' // ✅ SESSION COOKIE TAŞIR
+      });
+
+      const txt = await res.text();
+      let data;
+      try { data = JSON.parse(txt); }
+      catch { alert('Server returned non-JSON:\n' + txt); return false; }
+
+      if(!data.ok){
+        alert('Error: ' + (data.error || 'unknown'));
+        return false;
+      }
+      return true;
+    }
+
+    async function acceptOffer(id){
+      if(await postOfferAction('accept', id)) location.reload();
+    }
+
+    async function rejectOffer(id){
+      if(await postOfferAction('reject', id)) location.reload();
+    }
+
+    async function counterOffer(id){
+      const input = document.getElementById('counter_'+id);
+      const val = parseFloat((input?.value || '0').replace(',', '.'));
+      if(val <= 0){ alert('Enter a valid counter price'); return; }
+      if(await postOfferAction('counter', id, val)) location.reload();
+    }
+  </script>
 <?php endif; ?>
 
+
+ 
+
     </div>
+
 </body>
 </html>
