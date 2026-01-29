@@ -124,8 +124,7 @@
   <li>Advanced third-party integrations beyond basic map and location services.</li>
 </ul>
 
-
-
+<hr />
 
 <h2>📱 Usage</h2>
 
