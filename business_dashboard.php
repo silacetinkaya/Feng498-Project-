@@ -110,7 +110,8 @@ if (isset($_POST['add_product'])) {
     try {
         $pdo->beginTransaction();
 
-        $negotiable  = isset($_POST['p_negotiable']);
+        $negotiable = isset($_POST['p_negotiable']);
+
         // Base price
         $price = (float)($_POST['p_price'] ?? 0);
         if ($price <= 0) {
@@ -118,7 +119,7 @@ if (isset($_POST['add_product'])) {
         }
 
         // Discount logic
-        $isDiscounted = isset($_POST['is_discounted']); // boolean true/false
+        $isDiscounted = isset($_POST['is_discounted']);
 
         $discountPercent = null;
         $discountedPrice = null;
@@ -148,17 +149,51 @@ if (isset($_POST['add_product'])) {
 
         $currentPrice = $isDiscounted ? $discountedPrice : $price;
 
-        // INSERT product (includes discount columns)
+        // NEW: Booking fields
+        $bookable = isset($_POST['bookable']);
+        $durationMinutes = null;
+        $depositRequired = false;
+        $depositPercent = 0;
+
+        if ($bookable) {
+            $durationMinutes = (int)($_POST['duration_minutes'] ?? 0);
+
+            if ($durationMinutes <= 0) {
+                throw new Exception("Bookable services must have a valid duration.");
+            }
+
+            $depositRequired = isset($_POST['deposit_required']);
+
+            if ($depositRequired) {
+                $depositPercent = (int)($_POST['deposit_percent'] ?? 0);
+
+                if ($depositPercent < 1 || $depositPercent > 100) {
+                    throw new Exception("Deposit percent must be between 1 and 100.");
+                }
+            }
+
+            // Auto rule: 120 min+ => if no deposit selected, set 20%
+            if ($durationMinutes >= 120 && !$depositRequired) {
+                $depositRequired = true;
+                $depositPercent = 20;
+            }
+        }
+
+        // INSERT product
         $ins = $pdo->prepare("
             INSERT INTO products (
                 business_id, name, categories, description,
                 product_prices, available,
-                original_price, discounted_price, discount_percent, is_discounted
+                original_price, discounted_price, discount_percent, is_discounted,
+                bookable, duration_minutes, deposit_required, deposit_percent
             )
-            VALUES (?, ?, ?, ?, ?, true, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, true, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
         ");
+
         $isDiscountedDb = $isDiscounted ? 'true' : 'false';
+        $bookableDb = $bookable ? 'true' : 'false';
+        $depositRequiredDb = $depositRequired ? 'true' : 'false';
 
         $ins->execute([
             $businessId,
@@ -169,8 +204,13 @@ if (isset($_POST['add_product'])) {
             $originalPrice,
             $discountedPrice,
             $discountPercent,
-            $isDiscountedDb
+            $isDiscountedDb,
+            $bookableDb,
+            $durationMinutes,
+            $depositRequiredDb,
+            $depositPercent
         ]);
+
         $newProdId = $ins->fetchColumn();
 
         // Save price history
@@ -180,8 +220,6 @@ if (isset($_POST['add_product'])) {
         ");
         $negotiableDb = $negotiable ? 'true' : 'false';
         $insPrice->execute([$newProdId, $currentPrice, $negotiableDb]);
-
-        
 
         // Save image
         if (isset($_FILES['p_image']) && $_FILES['p_image']['error'] === UPLOAD_ERR_OK) {
@@ -213,6 +251,194 @@ if (isset($_POST['add_product'])) {
     }
 }
 
+    /* ----------------------------
+   BUY AD PACKAGE (Bronze/Silver/Gold)
+----------------------------- */
+if (isset($_POST['buy_ad_package'])) {
+    try {
+        $packageCode = strtoupper(trim($_POST['package_code'] ?? ''));
+
+        if (!in_array($packageCode, ['BRONZE','SILVER','GOLD'], true)) {
+            throw new Exception("Invalid package.");
+        }
+
+        // Paket ID
+        $pkg = $pdo->prepare("SELECT id FROM ad_packages WHERE code = :c AND is_active = TRUE");
+        $pkg->execute([':c' => $packageCode]);
+        $packageId = (int)($pkg->fetchColumn() ?: 0);
+        if ($packageId <= 0) {
+            throw new Exception("Package not found.");
+        }
+
+        // Varsa eski aktif paketi iptal et (temiz kalsın)
+        $pdo->prepare("
+            UPDATE ad_subscriptions
+            SET status = 'cancelled', updated_at = NOW()
+            WHERE business_id = :bid AND status = 'active' AND ends_at > NOW()
+        ")->execute([':bid' => $businessId]);
+
+        // 30 gün aktif et
+        $pdo->prepare("
+            INSERT INTO ad_subscriptions (business_id, package_id, status, starts_at, ends_at)
+            VALUES (:bid, :pid, 'active', NOW(), NOW() + INTERVAL '30 days')
+        ")->execute([':bid' => $businessId, ':pid' => $packageId]);
+
+        $successMessage = "Advertising package activated: " . $packageCode;
+        $tab = 'ads';
+
+    } catch (Exception $e) {
+        $errorMessage = $e->getMessage();
+        $tab = 'ads';
+    }
+   
+
+}
+if (isset($_POST['add_staff'])) {
+    try {
+        $fullName = trim($_POST['staff_full_name'] ?? '');
+        $role = trim($_POST['staff_role'] ?? '');
+        $selectedServices = $_POST['staff_services'] ?? [];
+
+        if ($fullName === '') {
+            throw new Exception("Staff name is required.");
+        }
+
+        $pdo->beginTransaction();
+
+        $insStaff = $pdo->prepare("
+            INSERT INTO staff (business_id, full_name, role, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, TRUE, NOW(), NOW())
+            RETURNING id
+        ");
+        $insStaff->execute([
+            $businessId,
+            $fullName,
+            $role
+        ]);
+
+        $staffId = $insStaff->fetchColumn();
+
+        if (!empty($selectedServices)) {
+            $insStaffService = $pdo->prepare("
+                INSERT INTO staff_services (staff_id, product_id, created_at)
+                VALUES (?, ?, NOW())
+            ");
+
+            foreach ($selectedServices as $productId) {
+                $productId = (int)$productId;
+                if ($productId > 0) {
+                    $insStaffService->execute([$staffId, $productId]);
+                }
+            }
+        }
+
+        $pdo->commit();
+
+        $successMessage = "Staff added successfully.";
+        $tab = 'staff';
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $errorMessage = $e->getMessage();
+        $tab = 'staff';
+    }
+}
+/* ----------------------------
+   DELETE STAFF
+----------------------------- */
+if (isset($_POST['delete_staff'])) {
+    try {
+        $staffId = (int)($_POST['staff_id'] ?? 0);
+
+        $delStaff = $pdo->prepare("
+            DELETE FROM staff
+            WHERE id = ? AND business_id = ?
+        ");
+        $delStaff->execute([$staffId, $businessId]);
+
+        $successMessage = "Staff deleted.";
+        $tab = 'staff';
+    } catch (Exception $e) {
+        $errorMessage = "Error deleting staff.";
+        $tab = 'staff';
+    }
+}
+/* ----------------------------
+   SAVE STAFF HOURS
+----------------------------- */
+if (isset($_POST['save_staff_hours'])) {
+    try {
+        $staffId = (int)($_POST['staff_id'] ?? 0);
+
+        // Staff gerçekten bu business'a ait mi?
+        $checkStaff = $pdo->prepare("
+            SELECT id FROM staff
+            WHERE id = ? AND business_id = ?
+            LIMIT 1
+        ");
+        $checkStaff->execute([$staffId, $businessId]);
+        if (!$checkStaff->fetchColumn()) {
+            throw new Exception("Invalid staff.");
+        }
+
+        $daysOfWeek = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+
+        foreach ($daysOfWeek as $day) {
+            $start = $_POST["{$day}_start"] ?? null;
+            $end = $_POST["{$day}_end"] ?? null;
+            $closed = isset($_POST["{$day}_closed"]);
+
+            if ($start === '') $start = null;
+            if ($end === '') $end = null;
+
+            if (!$closed && (!$start || !$end)) {
+                // çalışıyorsa hem başlangıç hem bitiş olmalı
+                throw new Exception("Please fill working hours for $day or mark it closed.");
+            }
+
+            $check = $pdo->prepare("
+                SELECT id
+                FROM staff_availability
+                WHERE staff_id = ? AND day_of_week = ?
+            ");
+            $check->execute([$staffId, $day]);
+            $existingId = $check->fetchColumn();
+
+            if ($existingId) {
+                $upd = $pdo->prepare("
+                    UPDATE staff_availability
+                    SET start_time = ?, end_time = ?, is_closed = ?, updated_at = NOW()
+                    WHERE id = ?
+                ");
+                $upd->execute([
+                    $closed ? null : $start,
+                    $closed ? null : $end,
+                    $closed ? 'true' : 'false',
+                    $existingId
+                ]);
+            } else {
+                $ins = $pdo->prepare("
+                    INSERT INTO staff_availability (staff_id, day_of_week, start_time, end_time, is_closed, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, NOW(), NOW())
+                ");
+                $ins->execute([
+                    $staffId,
+                    $day,
+                    $closed ? null : $start,
+                    $closed ? null : $end,
+                    $closed ? 'true' : 'false'
+                ]);
+            }
+        }
+
+        $successMessage = "Staff working hours saved.";
+        $tab = 'staff';
+    } catch (Exception $e) {
+        $errorMessage = $e->getMessage();
+        $tab = 'staff';
+    }
+}
 
     /* ----------------------------
        DELETE PRODUCT
@@ -399,7 +625,18 @@ $prodSql = "
 $stmtProd = $pdo->prepare($prodSql);
 $stmtProd->execute([$businessId]);
 $products = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
-
+/* ----------------------------
+   BOOKABLE SERVICES FOR STAFF ASSIGNMENT
+----------------------------- */
+$stmtBookableServices = $pdo->prepare("
+    SELECT id, name
+    FROM products
+    WHERE business_id = ?
+      AND (bookable = TRUE OR bookable = 't')
+    ORDER BY name ASC
+");
+$stmtBookableServices->execute([$businessId]);
+$bookableServices = $stmtBookableServices->fetchAll(PDO::FETCH_ASSOC);
 /* ----------------------------
    REVIEWS
 ----------------------------- */
@@ -434,8 +671,51 @@ $stmtOffers = $pdo->prepare("
 $stmtOffers->execute([$businessId]);
 $offers = $stmtOffers->fetchAll(PDO::FETCH_ASSOC);
 
+/* ----------------------------
+   STAFF
+----------------------------- */
+$stmtStaff = $pdo->prepare("
+    SELECT
+        s.id,
+        s.business_id,
+        s.full_name,
+        s.role,
+        s.is_active,
+        s.created_at,
+        s.updated_at,
+        COALESCE(STRING_AGG(p.name, ', ' ORDER BY p.name), '') AS services
+    FROM staff s
+    LEFT JOIN staff_services ss ON ss.staff_id = s.id
+    LEFT JOIN products p ON p.id = ss.product_id
+    WHERE s.business_id = ?
+    GROUP BY
+        s.id, s.business_id, s.full_name, s.role, s.is_active, s.created_at, s.updated_at
+    ORDER BY s.id DESC
+");
 
+$stmtStaff->execute([$businessId]);
+$staffList = $stmtStaff->fetchAll(PDO::FETCH_ASSOC);
+/* ----------------------------
+   STAFF AVAILABILITY
+----------------------------- */
+$stmtStaffHours = $pdo->prepare("
+    SELECT *
+    FROM staff_availability
+    WHERE staff_id IN (
+        SELECT id FROM staff WHERE business_id = ?
+    )
+");
+$stmtStaffHours->execute([$businessId]);
+$staffHoursRows = $stmtStaffHours->fetchAll(PDO::FETCH_ASSOC);
 
+$staffHoursMap = [];
+foreach ($staffHoursRows as $row) {
+    $staffHoursMap[$row['staff_id']][$row['day_of_week']] = [
+        'start' => substr($row['start_time'] ?? '', 0, 5),
+        'end' => substr($row['end_time'] ?? '', 0, 5),
+        'closed' => (bool)$row['is_closed']
+    ];
+}
 /* ----------------------------
    HOURS
 ----------------------------- */
@@ -489,45 +769,186 @@ $categories = [
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <style>
-        .msg { padding: 10px; border-radius: 5px; margin-bottom: 20px; }
-        .msg.success { background: #d4edda; color: #155724; }
-        .msg.error { background: #f8d7da; color: #721c24; }
+ <style>
+  body { margin: 0; font-family: Arial, sans-serif; background: #f4f5fb; }
 
-        .product-img-thumb { width: 60px; height: 60px; object-fit: cover; border-radius: 5px; border: 1px solid #ddd; }
+  /* Messages */
+  .msg { padding: 10px; border-radius: 6px; margin-bottom: 20px; }
+  .msg.success { background: #d4edda; color: #155724; }
+  .msg.error { background: #f8d7da; color: #721c24; }
 
-        /* PRICE LIST GRID */
-        .pl-grid { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); 
-            gap: 15px; 
-            margin-top: 20px; 
-        }
-        .pl-item { 
-            border: 1px solid #ddd; 
-            padding: 5px; 
-            border-radius: 5px; 
-            text-align: center; 
-        }
-        .pl-item img { 
-            width: 100%; 
-            height: 200px; 
-            object-fit: cover; 
-            cursor: pointer; 
-        }
+  /* Basic form + buttons */
+  .form-control { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
+  .btn { padding: 9px 16px; border: none; border-radius: 8px; cursor: pointer; color: #fff; font-weight: 700; }
+  .btn-primary { background: #3498db; }
+  .btn-success { background: #2ecc71; }
+  .btn-danger { background: #e74c3c; }
+  .btn-secondary { background: #95a5a6; }
+  .btn.full { width: 100%; }
+  .btn.disabled { opacity: .6; cursor: not-allowed; }
 
-        /* Pagination */
-        .pagination { display: flex; justify-content: center; gap: 5px; margin-top: 20px; }
-        .pagination a { padding: 6px 12px; background: white; border: 1px solid #ddd; color: #333; text-decoration: none; border-radius: 4px; }
-        .pagination a.active { background: #d32f2f; color: white; border-color: #d32f2f; }
-        
-        /* Form specifics */
-        .form-control { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        .btn { padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; color: white; }
-        .btn-primary { background: #3498db; }
-        .btn-success { background: #2ecc71; }
-        .btn-danger { background: #e74c3c; }
-    </style>
+  /* Thumb */
+  .product-img-thumb { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; }
+
+  /* PRICE LIST GRID */
+  .pl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+  }
+  .pl-item {
+    border: 1px solid #ddd;
+    padding: 5px;
+    border-radius: 10px;
+    text-align: center;
+    background: #fff;
+  }
+  .pl-item img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    cursor: pointer;
+    border-radius: 8px;
+  }
+
+  /* Pagination */
+  .pagination { display: flex; justify-content: center; gap: 6px; margin-top: 20px; flex-wrap: wrap; }
+  .pagination a {
+    padding: 6px 12px;
+    background: #fff;
+    border: 1px solid #ddd;
+    color: #333;
+    text-decoration: none;
+    border-radius: 6px;
+    font-weight: 700;
+  }
+  .pagination a.active { background: #d32f2f; color: #fff; border-color: #d32f2f; }
+
+  /* ------- ADS - CLEAN PRICING UI ------- */
+  .ad-status {
+    background:#fff;
+    border:1px solid #eee;
+    border-radius:12px;
+    padding:12px 14px;
+    margin-bottom:16px;
+  }
+
+  .pricing-grid{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap:16px;
+  margin-top:12px;
+  }
+
+  @media (max-width: 1100px){
+  .pricing-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+   @media (max-width: 780px){
+  .pricing-grid{ grid-template-columns: 1fr; }
+   }
+
+  .pricing-card{
+    border:1px solid #e9e9e9;
+    border-radius:16px;
+    background:#fff;
+    padding:18px;
+    display:flex;
+    flex-direction:column;
+    min-height: 360px;
+  }
+
+  .pricing-card.current{
+    border-color:#e53935;
+    box-shadow:0 0 0 3px rgba(229,57,53,.10);
+  }
+
+  .tier-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:8px;
+  }
+
+  .tier-name{
+    font-size:20px;
+    font-weight:900;
+    margin:0;
+  }
+
+  .tier-badge{
+    background:#f3f4f6;
+    border:1px solid #e5e7eb;
+    padding:4px 10px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:900;
+  }
+
+  .small-muted{
+    color:#6b7280;
+    font-size:13px;
+    margin-top:2px;
+  }
+
+  .price{
+    font-size:28px;
+    font-weight:950;
+    margin:12px 0 6px;
+  }
+  .price small{
+    font-size:13px;
+    font-weight:800;
+    color:#6b7280;
+  }
+
+  .features{
+    margin:10px 0 12px;
+    padding-left:0;
+    list-style:none;
+  }
+  .features li{
+    display:flex;
+    gap:8px;
+    align-items:flex-start;
+    margin:8px 0;
+    color:#111827;
+    font-size:14px;
+  }
+  .features li::before{
+    content:"✓";
+    font-weight:950;
+  }
+
+  .ad-accordion{
+    margin-top:8px;
+    border:1px dashed #e5e7eb;
+    border-radius:14px;
+    padding:10px 12px;
+    background:#fafafa;
+  }
+  .ad-accordion summary{
+    cursor:pointer;
+    font-weight:950;
+    list-style:none;
+  }
+  .ad-accordion summary::-webkit-details-marker{ display:none; }
+
+  .ad-detail-list{
+    margin:10px 0 0;
+    padding-left:18px;
+    color:#374151;
+    font-size:14px;
+  }
+  .ad-detail-list li{ margin:6px 0; }
+
+  .ad-detail-note{
+    margin-top:10px;
+    font-size:13px;
+    color:#6b7280;
+  }
+ </style>
+
 </head>
 <body>
 
@@ -536,10 +957,13 @@ $categories = [
         <ul class="nav-links">
             <li><a href="?tab=info" class="<?php echo $tab=='info'?'active':''; ?>"><i class="fas fa-info-circle"></i> Info</a></li>
             <li><a href="?tab=products" class="<?php echo $tab=='products'?'active':''; ?>"><i class="fas fa-box"></i> Products</a></li>
+            <li><a href="?tab=staff" class="<?php echo $tab=='staff'?'active':''; ?>"><i class="fas fa-user-tie"></i> Staff</a></li>
             <li><a href="?tab=reviews" class="<?php echo $tab=='reviews'?'active':''; ?>"><i class="fas fa-star"></i> Reviews</a></li>
             <li><a href="?tab=pricelist" class="<?php echo $tab=='pricelist'?'active':''; ?>"><i class="fas fa-file-invoice-dollar"></i> Price Lists</a></li>
             <li><a href="?tab=messages" class="<?php echo $tab=='messages'?'active':''; ?>"><i class="fas fa-comments"></i> Messages</a></li>
             <li> <a href="?tab=offers" class="<?php echo $tab=='offers'?'active':''; ?>"> <i class="fas fa-hand-holding-usd"></i> Offers</a></li>
+            <li><a href="?tab=ads" class="<?php echo $tab=='ads'?'active':''; ?>"><i class="fas fa-bullhorn"></i> Advertising</a></li>
+
         </ul>
         <div class="logout-section">
             <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
@@ -883,6 +1307,20 @@ function toggleDiscountFields(on){
     document.getElementById("discountFields").style.display = on ? "flex" : "none";
 }
 </script>
+<script>
+function toggleBookableFields(on){
+    document.getElementById("bookableFields").style.display = on ? "flex" : "none";
+    if(!on){
+        document.getElementById("depositFields").style.display = "none";
+        const dep = document.getElementById("deposit_required");
+        if(dep) dep.checked = false;
+    }
+}
+
+function toggleDepositFields(on){
+    document.getElementById("depositFields").style.display = on ? "block" : "none";
+}
+</script>
 
 
                         <div style="flex:1; min-width:200px;">
@@ -900,6 +1338,30 @@ function toggleDiscountFields(on){
                             <input type="checkbox" id="neg" name="p_negotiable" value="1"> 
                             <label for="neg">Price is Negotiable</label>
                         </div>
+
+                        <div style="width:100%; margin-top:8px;">
+                            <input type="checkbox" id="bookable" name="bookable" value="1" onchange="toggleBookableFields(this.checked)">
+                            <label for="bookable"><b>Bookable service</b></label>
+                        </div>
+
+                        <div id="bookableFields" style="display:none; width:100%; gap:15px; margin-top:8px; align-items:flex-end; flex-wrap:wrap;">
+                            <div style="flex:0 0 180px;">
+                            <label>Duration (minutes)</label><br>
+                            <input type="number" name="duration_minutes" min="1" class="form-control" placeholder="e.g. 30">
+                        </div>
+
+                           <div style="flex:0 0 180px;">
+                          <input type="checkbox" id="deposit_required" name="deposit_required" value="1" onchange="toggleDepositFields(this.checked)">
+                           <label for="deposit_required"><b>Deposit required</b></label>
+                        </div>
+
+                          <div id="depositFields" style="display:none; flex:0 0 180px;">
+                          <label>Deposit %</label><br>
+                            <input type="number" name="deposit_percent" min="1" max="100" class="form-control" placeholder="e.g. 20">
+                        </div>
+                      </div>
+
+
                         
                         <button type="submit" class="btn btn-primary" style="margin-top:10px;">
                             <i class="fas fa-plus"></i> Add
@@ -954,6 +1416,25 @@ function toggleDiscountFields(on){
                                         ?>
                                             <small style="color:orange; display:block;"><i class="fas fa-handshake"></i> Negotiable</small>
                                         <?php endif; ?>
+                                        <?php
+    $isBookable = $p['bookable'] ?? false;
+    $duration = $p['duration_minutes'] ?? null;
+    $depositReq = $p['deposit_required'] ?? false;
+    $depositPct = $p['deposit_percent'] ?? 0;
+?>
+
+<?php if($isBookable === true || $isBookable === 't' || $isBookable === 1): ?>
+    <small style="color:#2ecc71; display:block;">
+        <i class="fas fa-calendar-check"></i> Bookable service
+        <?php if (!empty($duration)): ?> - <?= (int)$duration ?> min<?php endif; ?>
+    </small>
+<?php endif; ?>
+
+<?php if($depositReq === true || $depositReq === 't' || $depositReq === 1): ?>
+    <small style="color:#e67e22; display:block;">
+        <i class="fas fa-wallet"></i> Deposit required: <?= (int)$depositPct ?>%
+    </small>
+<?php endif; ?>
                                     </td>
                                     <td>
                                         <form method="POST" onsubmit="return confirm('Delete this product?');">
@@ -982,7 +1463,149 @@ function toggleDiscountFields(on){
                     <?php endif; ?>
                 </div>
             </div>
+            <?php elseif ($tab == 'staff'): ?>
+<form method="POST" style="display:flex; gap:15px; align-items:flex-end; flex-wrap:wrap;">
+    <input type="hidden" name="add_staff" value="1">
 
+    <div style="flex:1; min-width:220px;">
+        <label>Full Name</label><br>
+        <input type="text" name="staff_full_name" required class="form-control">
+    </div>
+
+    <div style="flex:1; min-width:180px;">
+        <label>Role</label><br>
+        <input type="text" name="staff_role" class="form-control" placeholder="e.g. Nail Artist">
+    </div>
+
+    <div style="flex:1; min-width:260px;">
+        <label>Services</label><br>
+        <select name="staff_services[]" multiple class="form-control" style="height:120px;">
+            <?php foreach ($bookableServices as $srv): ?>
+                <option value="<?= (int)$srv['id'] ?>">
+                    <?= htmlspecialchars($srv['name']) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+        <small style="color:#777;">Hold Command/Ctrl to select multiple services.</small>
+    </div>
+
+    <button type="submit" class="btn btn-primary" style="margin-top:10px;">
+        <i class="fas fa-plus"></i> Add Staff
+    </button>
+</form>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Staff List</h3>
+        </div>
+        <div class="card-body">
+            <?php if (empty($staffList)): ?>
+                <p style="text-align:center; color:#777;">No staff added yet.</p>
+            <?php else: ?>
+                <table width="100%">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Role</th>
+                            <th>Services</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+<?php foreach ($staffList as $s): ?>
+<tr>
+    <td><strong><?= htmlspecialchars($s['full_name']) ?></strong></td>
+
+    <td><?= htmlspecialchars($s['role'] ?? '-') ?></td>
+    <td>
+<span style="background:#eee;padding:4px 8px;border-radius:8px;">
+<?= htmlspecialchars($s['services'] ?? '-') ?>
+</span>
+</td>
+
+    <td>
+        <?= !empty($s['is_active']) && ($s['is_active'] === true || $s['is_active'] === 't' || $s['is_active'] == 1) ? 'Active' : 'Inactive' ?>
+    </td>
+
+    <td>
+        <form method="POST" onsubmit="return confirm('Delete this staff member?');">
+            <input type="hidden" name="delete_staff" value="1">
+            <input type="hidden" name="staff_id" value="<?= (int)$s['id'] ?>">
+
+            <button type="submit" class="btn btn-danger" style="padding:5px 10px;">
+                <i class="fas fa-trash"></i>
+            </button>
+        </form>
+    </td>
+</tr>
+<?php endforeach; ?>
+</tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+    <div class="card-header">
+        <h3>Staff Working Hours</h3>
+    </div>
+    <div class="card-body">
+        <?php if (empty($staffList)): ?>
+            <p style="text-align:center; color:#777;">Add staff first.</p>
+        <?php else: ?>
+            <?php
+            $daysOfWeek = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+            ?>
+            <?php foreach ($staffList as $s): ?>
+                <?php
+                $sid = (int)$s['id'];
+                ?>
+                <div style="border:1px solid #eee; border-radius:10px; padding:15px; margin-bottom:20px; background:#fff;">
+                    <h4 style="margin-top:0;"><?= htmlspecialchars($s['full_name']) ?> <span style="color:#777; font-weight:normal;">(<?= htmlspecialchars($s['role'] ?? '-') ?>)</span></h4>
+
+                    <form method="POST">
+                        <input type="hidden" name="save_staff_hours" value="1">
+                        <input type="hidden" name="staff_id" value="<?= $sid ?>">
+
+                        <table style="width:100%; border-collapse:collapse;">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left; padding:8px;">Day</th>
+                                    <th style="text-align:left; padding:8px;">Start</th>
+                                    <th style="text-align:left; padding:8px;">End</th>
+                                    <th style="text-align:left; padding:8px;">Closed</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($daysOfWeek as $day): ?>
+                                    <?php
+                                    $row = $staffHoursMap[$sid][$day] ?? ['start'=>'', 'end'=>'', 'closed'=>false];
+                                    ?>
+                                    <tr>
+                                        <td style="padding:8px;"><?= $day ?></td>
+                                        <td style="padding:8px;">
+                                            <input type="time" name="<?= $day ?>_start" value="<?= htmlspecialchars($row['start']) ?>" class="form-control">
+                                        </td>
+                                        <td style="padding:8px;">
+                                            <input type="time" name="<?= $day ?>_end" value="<?= htmlspecialchars($row['end']) ?>" class="form-control">
+                                        </td>
+                                        <td style="padding:8px;">
+                                            <input type="checkbox" name="<?= $day ?>_closed" <?= !empty($row['closed']) ? 'checked' : '' ?>>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+
+                        <button type="submit" class="btn btn-success" style="margin-top:12px;">
+                            Save Working Hours
+                        </button>
+                    </form>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+</div>
         <?php elseif ($tab == 'reviews'): ?>
             <!-- REVIEWS CONTENT -->
             <div class="card">
@@ -1181,9 +1804,7 @@ function toggleDiscountFields(on){
     };
 
     loadBizChats();
-
-    </script>
-    <?php elseif ($tab == 'offers'): ?>
+<?php elseif ($tab == 'offers'): ?>
   <div class="card">
     <div class="card-header">
       <h3>Offers</h3>
@@ -1256,13 +1877,164 @@ function toggleDiscountFields(on){
                   </div>
                 </div>
               <?php endif; ?>
-
             </div>
           <?php endforeach; ?>
         </div>
       <?php endif; ?>
     </div>
   </div>
+
+<?php elseif ($tab == 'ads'): ?>
+
+  <?php
+    // Aktif paket
+    $activeSub = $pdo->prepare("
+      SELECT s.*, p.name, p.code, p.monthly_price
+      FROM ad_subscriptions s
+      JOIN ad_packages p ON p.id = s.package_id
+      WHERE s.business_id = ? AND s.status = 'active' AND s.ends_at > NOW()
+      ORDER BY s.id DESC
+      LIMIT 1
+    ");
+    $activeSub->execute([$businessId]);
+    $myAd = $activeSub->fetch(PDO::FETCH_ASSOC);
+
+    // Paketler
+    $pkgs = $pdo->query("
+      SELECT * FROM ad_packages
+      WHERE is_active = TRUE
+      ORDER BY id ASC
+    ")->fetchAll(PDO::FETCH_ASSOC);
+  ?>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Advertising Packages</h3>
+    </div>
+
+    <div class="card-body">
+
+      <div style="background:#fff;border:1px solid #eee;border-radius:12px;padding:12px;margin-bottom:15px;">
+        <?php if ($myAd): ?>
+          <strong>Active package:</strong> <?= htmlspecialchars($myAd['name']) ?> (<?= htmlspecialchars($myAd['code']) ?>)
+          <br><small>Ends at: <?= htmlspecialchars($myAd['ends_at']) ?></small>
+        <?php else: ?>
+          <strong>No active package.</strong>
+          <div style="color:#666;margin-top:6px;">Choose a package to get featured.</div>
+        <?php endif; ?>
+      </div>
+
+      <div class="pricing-grid">
+
+        <?php foreach ($pkgs as $p): ?>
+  <?php
+    $code = $p['code'] ?? '';
+    $isCurrent = ($myAd && ($myAd['code'] ?? '') === $code);
+
+    $title = $p['name'];
+    $price = $p['monthly_price'];
+
+    $features = [];
+    $detailsHtml = '';
+
+    if ($code === 'BRONZE') {
+      $features = [
+        'Featured on Home (Sponsored)',
+        '3 views per user / day',
+        'Rotates with other ads'
+      ];
+
+      $detailsHtml = "
+        <div class='ad-detail'>
+          <div class='ad-detail-title'>Bronze Details</div>
+          <ul class='ad-detail-list'>
+            <li><b>Where you appear:</b> Home / Discover section.</li>
+            <li><b>Goal:</b> Get quick visibility for new customers.</li>
+            <li><b>Best for:</b> New businesses or small budgets.</li>
+          </ul>
+        </div>
+      ";
+    }
+
+    elseif ($code === 'SILVER') {
+      $features = [
+        'Featured on Home (Sponsored)',
+        'Boosted in Search results',
+        '3 views per user / day'
+      ];
+
+      $detailsHtml = "
+        <div class='ad-detail'>
+          <div class='ad-detail-title'>Silver Details</div>
+          <ul class='ad-detail-list'>
+            <li><b>Where you appear:</b> Home + Search results.</li>
+            <li><b>Search boost:</b> Higher ranking when users search your category.</li>
+            <li><b>Best for:</b> Businesses people usually find by searching (cafe, barber, etc.).</li>
+          </ul>
+        </div>
+      ";
+    }
+
+    else { // GOLD
+      $features = [
+        'Featured on Home (Sponsored)',
+        'Boosted in Search results',
+        'Highlighted on Map (Pin)',
+        '3 views per user / day'
+      ];
+
+      $detailsHtml = "
+        <div class='ad-detail'>
+          <div class='ad-detail-title'>Gold Details</div>
+          <ul class='ad-detail-list'>
+            <li><b>Where you appear:</b> Home + Search + Map highlight.</li>
+            <li><b>Map highlight:</b> Your pin stands out so nearby users notice you first.</li>
+            <li><b>Best for:</b> Location-based traffic (walk-ins, nearby customers).</li>
+          </ul>
+          <div class='ad-detail-note'>Tip: Add high-quality photos to increase clicks.</div>
+        </div>
+      ";
+    }
+  ?>
+
+  <div class="pricing-card <?= $isCurrent ? 'current' : '' ?>">
+    <div class="tier-row">
+      <h4 class="tier-name"><?= htmlspecialchars($title) ?></h4>
+      <span class="tier-badge"><?= htmlspecialchars($code) ?></span>
+    </div>
+
+    <div class="price">
+      <?= htmlspecialchars($price) ?> TL <small>/ month</small>
+    </div>
+
+    <ul class="features">
+      <?php foreach ($features as $f): ?>
+        <li>✓ <?= htmlspecialchars($f) ?></li>
+      <?php endforeach; ?>
+    </ul>
+
+    <?php echo $detailsHtml; ?>
+
+    <form method="POST" style="margin-top:14px;">
+      <input type="hidden" name="buy_ad_package" value="1">
+      <input type="hidden" name="package_code" value="<?= htmlspecialchars($code) ?>">
+
+      <?php if ($isCurrent): ?>
+        <button type="button" class="btn btn-secondary full disabled" disabled>Current Plan</button>
+      <?php else: ?>
+        <button type="submit" class="btn btn-success full">Buy <?= htmlspecialchars($title) ?></button>
+      <?php endif; ?>
+    </form>
+  </div>
+<?php endforeach; ?>
+
+      </div>
+
+    </div>
+  </div>
+ 
+
+
 
   <script>
     async function postOfferAction(action, offerId, counterPrice=null){

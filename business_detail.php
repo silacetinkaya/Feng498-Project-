@@ -289,9 +289,13 @@ L.marker([<?= $lat ?>, <?= $lng ?>]).addTo(map);
     <?php else: ?>
         <?php foreach ($products as $p): ?>
             <?php
-              $isDisc = isTruePg($p['is_discounted'] ?? false);
-              $basePrice = $isDisc ? (float)($p['discounted_price'] ?? 0) : (float)($p['product_prices'] ?? 0);
-              $isNegotiable = isTruePg($p['is_negotiable'] ?? false);
+                $isDisc = isTruePg($p['is_discounted'] ?? false);
+                $basePrice = $isDisc ? (float)($p['discounted_price'] ?? 0) : (float)($p['product_prices'] ?? 0);
+                $isNegotiable = isTruePg($p['is_negotiable'] ?? false);
+                $isBookable = isTruePg($p['bookable'] ?? false);
+                $duration = $p['duration_minutes'] ?? null;
+                $depositRequired = isTruePg($p['deposit_required'] ?? false);
+                $depositPercent = (int)($p['deposit_percent'] ?? 0);
             ?>
 
             <div class="product-row">
@@ -326,17 +330,45 @@ L.marker([<?= $lat ?>, <?= $lng ?>]).addTo(map);
                         </div>
                     <?php endif; ?>
 
-                    <?php if (isset($_SESSION['user_id']) && $isNegotiable && $basePrice > 0): ?>
-                        <button type="button" class="offer-btn"
-                          data-product-id="<?= (int)$p['id'] ?>"
-                          data-business-id="<?= (int)$businessId ?>"
-                         data-product-name="<?= htmlspecialchars($p['name'] ?? '', ENT_QUOTES) ?>"
-                          data-base-price="<?= $basePrice ?>"
-                         style="margin-top:8px; background:#e53935; color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:700;">
-                          💸 Make Offer
-                      </button>
+                    <?php if ($isBookable): ?>
+                        <div style="margin-top:6px;">
+                            <small style="color:#2ecc71; display:block;">
+                                <i class="fas fa-calendar-check"></i> Bookable service
+                                <?php if (!empty($duration)): ?> - <?= (int)$duration ?> min<?php endif; ?>
+                            </small>
 
-                        
+                            <?php if ($depositRequired): ?>
+                                <small style="color:#e67e22; display:block;">
+                                    <i class="fas fa-wallet"></i> Deposit required: <?= $depositPercent ?>%
+                                </small>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if (isset($_SESSION['user_id']) && ((int)$_SESSION['user_id'] !== (int)($business['owner_id'] ?? 0))): ?>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+
+                            <?php if ($isNegotiable && $basePrice > 0): ?>
+                                <button type="button" class="offer-btn"
+                                  data-product-id="<?= (int)$p['id'] ?>"
+                                  data-business-id="<?= (int)$businessId ?>"
+                                  data-product-name="<?= htmlspecialchars($p['name'] ?? '', ENT_QUOTES) ?>"
+                                  data-base-price="<?= $basePrice ?>"
+                                  style="background:#e53935; color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:700;">
+                                  💸 Make Offer
+                                </button>
+                            <?php endif; ?>
+
+                            <?php if ($isBookable): ?>
+                                <a href="book_appointment.php?business_id=<?= (int)$businessId ?>&product_id=<?= (int)$p['id'] ?>" style="text-decoration:none;">
+                                    <button type="button"
+                                      style="background:#2ecc71; color:#fff; border:none; padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:700;">
+                                      📅 Book Appointment
+                                    </button>
+                                </a>
+                            <?php endif; ?>
+
+                        </div>
                     <?php endif; ?>
                 </div>
             </div>
