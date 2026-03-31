@@ -11,7 +11,7 @@ if (!$userId) {
 $businessId = (int)($_GET['business_id'] ?? 0);
 if ($businessId <= 0) die("Invalid business.");
 
-$st = $pdo->prepare("SELECT id FROM chats WHERE business_id = ? AND user_id = ? LIMIT 1");
+$st = $pdo->prepare("SELECT id FROM chats WHERE business_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1");
 $st->execute([$businessId, $userId]);
 $chatId = $st->fetchColumn();
 

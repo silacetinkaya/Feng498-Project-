@@ -276,35 +276,8 @@ try {
         header("Location: admin_dashboard.php?tab=reviews&msg=resp_approved");
         exit;
     }
-    // --- APPROVE PHOTO ---
-    elseif ($action === 'approve_photo') {
-        $id = $_GET['id'];
-        $source = $_GET['source'] ?? 'photo';
-
-        if ($source === 'pricelist') {
-            $stmt = $pdo->prepare("UPDATE price_lists SET is_approved = TRUE WHERE id = ?");
-        } else {
-            $stmt = $pdo->prepare("UPDATE photos SET is_approved = TRUE WHERE photo_id = ?");
-        }
-        $stmt->execute([$id]);
-        header("Location: admin_dashboard.php?tab=approvals&msg=approved");
-        exit;
-    }
-
-    // --- DELETE PHOTO ---
-    elseif ($action === 'delete_photo') {
-        $id = $_GET['id'];
-        $source = $_GET['source'] ?? 'photo';
-
-        if ($source === 'pricelist') {
-            $stmt = $pdo->prepare("DELETE FROM price_lists WHERE id = ?");
-        } else {
-            $stmt = $pdo->prepare("DELETE FROM photos WHERE photo_id = ?");
-        }
-        $stmt->execute([$id]);
-        header("Location: admin_dashboard.php?tab=approvals&msg=deleted");
-        exit;
-    }
+    
+    
     // --- ADD EDITOR'S CHOICE ---
     elseif ($action === 'add_editors_choice') {
         $id = $_GET['id'];

@@ -258,3 +258,407 @@ ADD COLUMN original_price DECIMAL,
 ADD COLUMN discounted_price DECIMAL,
 ADD COLUMN discount_percent INT,
 ADD COLUMN is_discounted BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE offers ADD COLUMN product_id INTEGER;
+ALTER TABLE offers ADD CONSTRAINT fk_offers_product
+FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE;
+
+ALTER TABLE offers ADD COLUMN note TEXT;
+
+ALTER TABLE offers ADD COLUMN counter_price DECIMAL;
+
+ALTER TABLE offers ALTER COLUMN status SET DEFAULT 'pending';
+UPDATE offers SET status='pending' WHERE status IS NULL;
+
+WITH ranked AS (
+  SELECT
+    id,
+    business_id,
+    user_id,
+    MAX(id) OVER (PARTITION BY business_id, user_id) AS keep_id,
+    ROW_NUMBER() OVER (PARTITION BY business_id, user_id ORDER BY id DESC) AS rn
+  FROM chats
+)
+UPDATE messages m
+SET chat_id = r.keep_id
+FROM ranked r
+WHERE m.chat_id = r.id AND r.rn > 1;
+
+WITH ranked AS (
+  SELECT
+    id,
+    business_id,
+    user_id,
+    MAX(id) OVER (PARTITION BY business_id, user_id) AS keep_id,
+    ROW_NUMBER() OVER (PARTITION BY business_id, user_id ORDER BY id DESC) AS rn
+  FROM chats
+)
+UPDATE offers o
+SET chat_id = r.keep_id
+FROM ranked r
+WHERE o.chat_id = r.id AND r.rn > 1;
+
+WITH ranked AS (
+  SELECT
+    id,
+    ROW_NUMBER() OVER (PARTITION BY business_id, user_id ORDER BY id DESC) AS rn
+  FROM chats
+)
+DELETE FROM chats c
+USING ranked r
+WHERE c.id = r.id AND r.rn > 1;
+ALTER TABLE chats
+ADD CONSTRAINT unique_chat_pair UNIQUE (business_id, user_id);
+-- OFFERS: product_id / note / counter_price garanti
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS product_id INTEGER;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS note TEXT;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS counter_price DECIMAL;
+
+-- FK (yoksa ekle)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_offers_product'
+  ) THEN
+    ALTER TABLE offers
+      ADD CONSTRAINT fk_offers_product
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE;
+  END IF;
+END$$;
+
+-- OFFERS status default
+ALTER TABLE offers ALTER COLUMN status SET DEFAULT 'pending';
+UPDATE offers SET status='pending' WHERE status IS NULL;
+
+-- MESSAGES: chat-based mesajlaşma kolonları garanti
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS chat_id INTEGER;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_type VARCHAR(20);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_ref_id INTEGER;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
+
+-- messages.chat_id FK (yoksa ekle)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_messages_chat'
+  ) THEN
+    ALTER TABLE messages
+      ADD CONSTRAINT fk_messages_chat
+      FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
+  END IF;
+END$$;
+
+-- Index (performans)
+CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id);
+CREATE INDEX IF NOT EXISTS idx_offers_chat_id ON offers(chat_id);
+
+-- ==============================
+-- ADS (Bronze / Silver / Gold)
+-- PostgreSQL
+-- ==============================
+
+-- 1) Paketler
+CREATE TABLE IF NOT EXISTS ad_packages (
+  id              SERIAL PRIMARY KEY,
+  code            VARCHAR(20) NOT NULL UNIQUE,     -- BRONZE / SILVER / GOLD
+  name            VARCHAR(50) NOT NULL,            -- Bronze / Silver / Gold
+  monthly_price   NUMERIC(10,2) NOT NULL DEFAULT 0,
+  daily_user_cap  INT NOT NULL DEFAULT 3,          -- user başına günlük max gösterim
+  priority_weight INT NOT NULL DEFAULT 1,          -- Gold daha yüksek
+  show_home       BOOLEAN NOT NULL DEFAULT TRUE,   -- Bronze+
+  show_search     BOOLEAN NOT NULL DEFAULT FALSE,  -- Silver+
+  show_map        BOOLEAN NOT NULL DEFAULT FALSE,  -- Gold+
+  is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- updated_at otomatik güncellensin (trigger’sız basit kullanım için biz update’lerde set edeceğiz)
+-- istersen trigger da ekleriz ama şart değil.
+
+-- 2) Abonelik (işletmenin satın aldığı paket)
+CREATE TABLE IF NOT EXISTS ad_subscriptions (
+  id           SERIAL PRIMARY KEY,
+  business_id  INTEGER NOT NULL,
+  package_id   INTEGER NOT NULL,
+  status       VARCHAR(20) NOT NULL DEFAULT 'active', -- active/expired/cancelled
+  starts_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+  ends_at      TIMESTAMP NOT NULL,
+  created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT fk_ad_sub_business
+    FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+  CONSTRAINT fk_ad_sub_package
+    FOREIGN KEY (package_id) REFERENCES ad_packages(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ad_sub_business ON ad_subscriptions(business_id);
+CREATE INDEX IF NOT EXISTS idx_ad_sub_status_end ON ad_subscriptions(status, ends_at);
+
+-- 3) Gösterimler (daily cap = 3 için)
+CREATE TABLE IF NOT EXISTS ad_impressions (
+  id              BIGSERIAL PRIMARY KEY,
+  subscription_id INTEGER NOT NULL,
+  business_id     INTEGER NOT NULL,
+  user_id         INTEGER NOT NULL,
+  impression_date DATE NOT NULL DEFAULT CURRENT_DATE,  -- gün bazlı limit
+  placement       VARCHAR(10) NOT NULL,                -- home/search/map
+  cnt             INT NOT NULL DEFAULT 0,
+  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT fk_imp_sub
+    FOREIGN KEY (subscription_id) REFERENCES ad_subscriptions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_imp_business
+    FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+  CONSTRAINT fk_imp_user
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+
+  CONSTRAINT ck_imp_placement CHECK (placement IN ('home','search','map')),
+  CONSTRAINT uq_imp UNIQUE (subscription_id, user_id, impression_date, placement)
+);
+
+CREATE INDEX IF NOT EXISTS idx_imp_business_date ON ad_impressions(business_id, impression_date);
+CREATE INDEX IF NOT EXISTS idx_imp_user_date ON ad_impressions(user_id, impression_date);
+
+-- 4) Tıklamalar (opsiyonel ama çok iyi durur)
+CREATE TABLE IF NOT EXISTS ad_clicks (
+  id              BIGSERIAL PRIMARY KEY,
+  subscription_id INTEGER NOT NULL,
+  business_id     INTEGER NOT NULL,
+  user_id         INTEGER NOT NULL,
+  placement       VARCHAR(10) NOT NULL,
+  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT fk_click_sub
+    FOREIGN KEY (subscription_id) REFERENCES ad_subscriptions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_click_business
+    FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+  CONSTRAINT fk_click_user
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+
+  CONSTRAINT ck_click_placement CHECK (placement IN ('home','search','map'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_click_business ON ad_clicks(business_id);
+CREATE INDEX IF NOT EXISTS idx_click_user ON ad_clicks(user_id);
+
+-- 5) Paket seed (Bronze / Silver / Gold)
+INSERT INTO ad_packages (code, name, monthly_price, daily_user_cap, priority_weight, show_home, show_search, show_map)
+VALUES
+  ('BRONZE', 'Bronze', 199.00, 3, 1, TRUE,  FALSE, FALSE),
+  ('SILVER', 'Silver', 399.00, 3, 2, TRUE,  TRUE,  FALSE),
+  ('GOLD',   'Gold',   699.00, 3, 3, TRUE,  TRUE,  TRUE)
+ON CONFLICT (code) DO UPDATE SET
+  name = EXCLUDED.name,
+  monthly_price = EXCLUDED.monthly_price,
+  daily_user_cap = EXCLUDED.daily_user_cap,
+  priority_weight = EXCLUDED.priority_weight,
+  show_home = EXCLUDED.show_home,
+  show_search = EXCLUDED.show_search,
+  show_map = EXCLUDED.show_map,
+  is_active = TRUE,
+  updated_at = NOW();
+
+-- ==============================
+-- Gösterim sayma (daily cap için)
+-- ==============================
+-- Örnek kullanım:
+-- INSERT INTO ad_impressions (subscription_id,business_id,user_id,impression_date,placement,cnt)
+-- VALUES ($1,$2,$3,CURRENT_DATE,'home',1)
+-- ON CONFLICT (subscription_id,user_id,impression_date,placement)
+-- DO UPDATE SET cnt = ad_impressions.cnt + 1, updated_at = NOW();
+-- =========================
+-- PRODUCTS: booking fields
+-- =========================
+ALTER TABLE products
+ADD COLUMN IF NOT EXISTS bookable BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE products
+ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NULL;
+
+ALTER TABLE products
+ADD COLUMN IF NOT EXISTS deposit_required BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE products
+ADD COLUMN IF NOT EXISTS deposit_percent INTEGER DEFAULT 0;
+
+
+-- =========================
+-- STAFF
+-- =========================
+CREATE TABLE IF NOT EXISTS staff (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    role VARCHAR(100),
+    photo_url VARCHAR(255),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_staff_business
+        FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_business_id
+ON staff(business_id);
+
+
+-- =========================
+-- STAFF <-> SERVICES
+-- =========================
+CREATE TABLE IF NOT EXISTS staff_services (
+    id SERIAL PRIMARY KEY,
+    staff_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_staff_services_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+    CONSTRAINT fk_staff_services_product
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    CONSTRAINT unique_staff_product UNIQUE (staff_id, product_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_services_staff_id
+ON staff_services(staff_id);
+
+CREATE INDEX IF NOT EXISTS idx_staff_services_product_id
+ON staff_services(product_id);
+
+
+-- =========================
+-- STAFF AVAILABILITY
+-- =========================
+CREATE TABLE IF NOT EXISTS staff_availability (
+    id SERIAL PRIMARY KEY,
+    staff_id INTEGER NOT NULL,
+    day_of_week VARCHAR(20) NOT NULL,
+    start_time TIME,
+    end_time TIME,
+    is_closed BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_staff_availability_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+    CONSTRAINT unique_staff_day UNIQUE (staff_id, day_of_week)
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_availability_staff_id
+ON staff_availability(staff_id);
+
+
+-- =========================
+-- APPOINTMENTS
+-- =========================
+CREATE TABLE IF NOT EXISTS appointments (
+    id SERIAL PRIMARY KEY,
+    business_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    staff_id INTEGER,
+
+    appointment_date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+
+    listed_price DECIMAL(10,2),
+    agreed_price DECIMAL(10,2),
+    deposit_amount DECIMAL(10,2) DEFAULT 0,
+
+    status VARCHAR(30) DEFAULT 'pending',
+    booking_type VARCHAR(20) DEFAULT 'direct',
+
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_appointments_business
+        FOREIGN KEY (business_id) REFERENCES business(shop_id) ON DELETE CASCADE,
+    CONSTRAINT fk_appointments_user
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    CONSTRAINT fk_appointments_product
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    CONSTRAINT fk_appointments_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_appointments_business_id
+ON appointments(business_id);
+
+CREATE INDEX IF NOT EXISTS idx_appointments_user_id
+ON appointments(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_appointments_staff_date
+ON appointments(staff_id, appointment_date);
+
+CREATE INDEX IF NOT EXISTS idx_appointments_business_date
+ON appointments(business_id, appointment_date);
+
+
+-- =========================
+-- OFFERS -> APPOINTMENT LINK
+-- =========================
+ALTER TABLE offers
+ADD COLUMN IF NOT EXISTS appointment_id INTEGER;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_offers_appointment'
+  ) THEN
+    ALTER TABLE offers
+      ADD CONSTRAINT fk_offers_appointment
+      FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL;
+  END IF;
+END $$;
+
+
+-- =========================
+-- OPTIONAL CHECK CONSTRAINTS
+-- =========================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'ck_appointments_status'
+  ) THEN
+    ALTER TABLE appointments
+      ADD CONSTRAINT ck_appointments_status
+      CHECK (status IN ('pending', 'confirmed', 'cancelled', 'completed', 'no_show', 'rescheduled'));
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'ck_appointments_booking_type'
+  ) THEN
+    ALTER TABLE appointments
+      ADD CONSTRAINT ck_appointments_booking_type
+      CHECK (booking_type IN ('direct', 'offer'));
+  END IF;
+END $$;
+ALTER TABLE staff
+ADD COLUMN IF NOT EXISTS rating NUMERIC(2,1) DEFAULT 0;
+
+ALTER TABLE staff
+ADD COLUMN IF NOT EXISTS review_count INTEGER DEFAULT 0;
+SELECT
+    s.id,
+    s.business_id,
+    s.full_name,
+    s.role,
+    s.is_active,
+    s.created_at,
+    s.updated_at,
+    COALESCE(STRING_AGG(p.name, ', ' ORDER BY p.name), '') AS services
+FROM staff s
+LEFT JOIN staff_services ss ON ss.staff_id = s.id
+LEFT JOIN products p ON p.id = ss.product_id
+WHERE s.business_id = 1
+GROUP BY
+    s.id, s.business_id, s.full_name, s.role, s.is_active, s.created_at, s.updated_at
+ORDER BY s.id DESC;
+ALTER TABLE appointments
+ADD COLUMN IF NOT EXISTS staff_id INTEGER REFERENCES staff(id);

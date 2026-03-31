@@ -22,6 +22,18 @@ $st = $pdo->prepare("
 ");
 $st->execute([$chatId]);
 $msgs = $st->fetchAll(PDO::FETCH_ASSOC);
+// Offers for this chat
+$stO = $pdo->prepare("
+  SELECT o.id, o.product_id, o.offered_price, o.counter_price, o.status, o.created_time,
+         p.name AS product_name
+  FROM offers o
+  LEFT JOIN products p ON p.id = o.product_id
+  WHERE o.chat_id = ?
+  ORDER BY o.created_time ASC
+");
+$stO->execute([$chatId]);
+$offers = $stO->fetchAll(PDO::FETCH_ASSOC);
+
 
 // Business'tan gelenleri okundu işaretle
 $mark = $pdo->prepare("
@@ -33,4 +45,8 @@ $mark = $pdo->prepare("
 $mark->execute([$chatId]);
 
 header("Content-Type: application/json");
-echo json_encode(["messages" => $msgs]);
+echo json_encode([
+  "messages" => $msgs,
+  "offers" => $offers
+]);
+

@@ -136,12 +136,27 @@ if ($tab === 'reviews') {
 }
 
 if ($tab === 'offers') {
-    $stmt = $pdo->prepare("SELECT o.offered_price, o.status, b.name AS business_name
-                            FROM offers o LEFT JOIN business b ON b.shop_id=o.business_id
-                            WHERE o.user_id=?");
+    $stmt = $pdo->prepare("
+        SELECT
+            o.id,
+            o.offered_price,
+            o.counter_price,
+            o.status,
+            o.created_time,
+            o.chat_id,
+            b.shop_id AS business_id,
+            b.name AS business_name,
+            p.name AS product_name
+        FROM offers o
+        JOIN business b ON b.shop_id = o.business_id
+        LEFT JOIN products p ON p.id = o.product_id
+        WHERE o.user_id = ?
+        ORDER BY o.created_time DESC
+    ");
     $stmt->execute([$userId]);
     $myOffers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
 $discountProducts = [];
 if ($tab === 'discounts') {
     $stmt = $pdo->prepare("
@@ -522,13 +537,81 @@ if ($tab === 'editors_choice') {
                     <?php endforeach; ?>
                 <?php endif; ?>
 
-            <?php elseif ($tab === 'offers'): ?>
+              <?php elseif ($tab === 'offers'): ?>
 
-                <?php foreach ($myOffers as $o): ?>
-                    <div class="card">
-                        <?= htmlspecialchars($o['business_name']) ?> – <?= $o['offered_price'] ?> TL (<?= $o['status'] ?>)
+    <div class="card">
+        <h3 style="margin-top:0;">My Offers</h3>
+
+        <?php if (empty($myOffers)): ?>
+            <p style="color:#666; text-align:center; padding:20px;">No offers yet.</p>
+        <?php else: ?>
+            <?php foreach ($myOffers as $o): ?>
+                <?php
+                    $status = $o['status'] ?? 'pending';
+                    $badgeColor = [
+                        'pending'   => '#f39c12',
+                        'accepted'  => '#2ecc71',
+                        'declined'  => '#e74c3c',
+                        'countered' => '#3498db',
+                    ][$status] ?? '#999';
+                ?>
+
+                <div style="border:1px solid #eee; border-radius:12px; padding:15px; margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+                        <div style="flex:1;">
+                            <div style="font-weight:900; font-size:1.05rem;">
+                                <?= htmlspecialchars($o['business_name'] ?? '') ?>
+                            </div>
+
+                            <div style="color:#666; margin-top:6px;">
+                                Product: <b><?= htmlspecialchars($o['product_name'] ?? 'Unknown') ?></b>
+                            </div>
+
+                            <div style="margin-top:8px; font-weight:900;">
+                                Your offer: <?= number_format((float)($o['offered_price'] ?? 0), 2) ?> TL
+                            </div>
+
+                            <?php if (($status === 'countered') && $o['counter_price'] !== null): ?>
+                                <div style="margin-top:6px; font-weight:900; color:#3498db;">
+                                    Counter offer: <?= number_format((float)$o['counter_price'], 2) ?> TL
+                                </div>
+                            <?php endif; ?>
+
+                            <div style="margin-top:10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                <span style="background:<?= $badgeColor ?>; color:#fff; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:900;">
+                                    <?= strtoupper($status) ?>
+                                </span>
+
+                                <?php if (!empty($o['created_time'])): ?>
+                                    <span style="color:#999; font-size:12px;">
+                                        <?= date('M d, Y H:i', strtotime($o['created_time'])) ?>
+                                    </span>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <a href="?tab=home&view_business=<?= (int)$o['business_id'] ?>" style="text-decoration:none;">
+                                <button class="btn" style="background:#3498db;">View</button>
+                            </a>
+
+                            <?php if (!empty($o['chat_id'])): ?>
+                                <a href="?tab=messages&chat_id=<?= (int)$o['chat_id'] ?>" style="text-decoration:none;">
+                                    <button class="btn" style="background:#666;">Open Chat</button>
+                                </a>
+                            <?php else: ?>
+                                <a href="chat_start.php?business_id=<?= (int)$o['business_id'] ?>" style="text-decoration:none;">
+                                    <button class="btn" style="background:#666;">Open Chat</button>
+                                </a>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                <?php endforeach; ?>
+                </div>
+
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+
 
             <?php elseif ($tab === 'messages'): ?>
 
@@ -614,7 +697,7 @@ async function openChat(chatId, businessName){
   pollTimer = setInterval(loadMessages, 2500);
 }
 
-async function loadMessages(){
+async function loadMessages() {
   if (!currentChatId) return;
 
   const res = await fetch('chat_fetch_messages.php?chat_id=' + encodeURIComponent(currentChatId));
@@ -623,8 +706,10 @@ async function loadMessages(){
   const box = document.getElementById('msgBox');
   box.innerHTML = '';
 
+  // Normal messages
   (data.messages || []).forEach(m => {
     const mine = (m.sender_type === 'user');
+
     const bubble = document.createElement('div');
     bubble.style.maxWidth = '75%';
     bubble.style.margin = mine ? '8px 0 8px auto' : '8px auto 8px 0';
@@ -632,13 +717,56 @@ async function loadMessages(){
     bubble.style.borderRadius = '14px';
     bubble.style.background = mine ? '#dff0ff' : '#ffffff';
     bubble.style.border = '1px solid #e6e6e6';
-    bubble.innerHTML = `<div style="white-space:pre-wrap;">${esc(m.content)}</div>
-                        <div style="margin-top:6px;color:#999;font-size:12px;">${esc(m.created_at)}</div>`;
+
+    bubble.innerHTML = `
+      <div style="white-space:pre-wrap;">${esc(m.content)}</div>
+      <div style="margin-top:6px;color:#999;font-size:12px;">${esc(m.created_at)}</div>
+    `;
+
     box.appendChild(bubble);
+  });
+
+  // Offer cards
+  (data.offers || []).forEach(o => {
+    const card = document.createElement('div');
+    card.style.maxWidth = '75%';
+    card.style.margin = '8px 0 8px auto'; // user offer -> right
+    card.style.padding = '12px 12px';
+    card.style.borderRadius = '14px';
+    card.style.background = '#fffbe6';
+    card.style.border = '1px solid #f1e0a6';
+
+    const status = String(o.status || 'pending').toUpperCase();
+
+    let extra = '';
+    if (o.status === 'countered' && o.counter_price != null) {
+      extra = `
+        <div style="margin-top:6px; font-weight:900; color:#3498db;">
+          Counter: ${esc(o.counter_price)} TL
+        </div>
+      `;
+    }
+
+    card.innerHTML = `
+      <div style="font-weight:900;">💸 Offer</div>
+      <div style="margin-top:6px; color:#444;">
+        Product: <b>${esc(o.product_name || 'Unknown')}</b>
+      </div>
+      <div style="margin-top:6px; font-weight:900;">
+        Offered: ${esc(o.offered_price)} TL
+      </div>
+      ${extra}
+      <div style="margin-top:8px; color:#999; font-size:12px;">
+        ${status} • ${esc(o.created_time)}
+      </div>
+    `;
+
+    box.appendChild(card);
   });
 
   box.scrollTop = box.scrollHeight;
 }
+
 
 async function sendMessage(){
   if (!currentChatId) return;

@@ -4,8 +4,8 @@
 // CONFIGURATION: Fill in your specific database details here
 $host = 'localhost';
 $db_name = 'testdb'; // <--- ENTER DB NAME
-$username = 'postgres';     // <--- ENTER DB USER
-$password = 'murat123'; // <--- ENTER DB PASSWORD
+$username = 'silacetinkaya';     // <--- ENTER DB USER
+$password = 'ss141414'; // <--- ENTER DB PASSWORD
 $port = '5432'; // Default PostgreSQL port
 
 try {
