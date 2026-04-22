@@ -344,6 +344,72 @@ if (isset($_POST['add_staff'])) {
         $tab = 'staff';
     }
 }
+
+/* ----------------------------
+   UPDATE STAFF
+----------------------------- */
+if (isset($_POST['update_staff'])) {
+    try {
+        $staffId = (int)($_POST['staff_id'] ?? 0);
+        $fullName = trim($_POST['staff_full_name'] ?? '');
+        $role = trim($_POST['staff_role'] ?? '');
+        $selectedServices = $_POST['staff_services'] ?? [];
+
+        if ($staffId <= 0) {
+            throw new Exception("Invalid staff ID.");
+        }
+
+        if ($fullName === '') {
+            throw new Exception("Staff name is required.");
+        }
+
+        $pdo->beginTransaction();
+
+        $updStaff = $pdo->prepare("
+            UPDATE staff
+            SET full_name = ?, role = ?, updated_at = NOW()
+            WHERE id = ? AND business_id = ?
+        ");
+        $updStaff->execute([
+            $fullName,
+            $role,
+            $staffId,
+            $businessId
+        ]);
+
+        $delStaffServices = $pdo->prepare("
+            DELETE FROM staff_services
+            WHERE staff_id = ?
+        ");
+        $delStaffServices->execute([$staffId]);
+
+        if (!empty($selectedServices)) {
+            $insStaffService = $pdo->prepare("
+                INSERT INTO staff_services (staff_id, product_id, created_at)
+                VALUES (?, ?, NOW())
+            ");
+
+            foreach ($selectedServices as $productId) {
+                $productId = (int)$productId;
+                if ($productId > 0) {
+                    $insStaffService->execute([$staffId, $productId]);
+                }
+            }
+        }
+
+        $pdo->commit();
+
+        $successMessage = "Staff updated successfully.";
+        $tab = 'staff';
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $errorMessage = $e->getMessage();
+        $tab = 'staff';
+    }
+}
+
 /* ----------------------------
    DELETE STAFF
 ----------------------------- */
@@ -351,15 +417,32 @@ if (isset($_POST['delete_staff'])) {
     try {
         $staffId = (int)($_POST['staff_id'] ?? 0);
 
+        if ($staffId <= 0) {
+            throw new Exception("Invalid staff ID.");
+        }
+
+        $pdo->beginTransaction();
+
+        $delStaffServices = $pdo->prepare("
+            DELETE FROM staff_services
+            WHERE staff_id = ?
+        ");
+        $delStaffServices->execute([$staffId]);
+
         $delStaff = $pdo->prepare("
             DELETE FROM staff
             WHERE id = ? AND business_id = ?
         ");
         $delStaff->execute([$staffId, $businessId]);
 
+        $pdo->commit();
+
         $successMessage = "Staff deleted.";
         $tab = 'staff';
     } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         $errorMessage = "Error deleting staff.";
         $tab = 'staff';
     }
@@ -1494,57 +1577,86 @@ function toggleDepositFields(on){
     </button>
 </form>
 
-    <div class="card">
-        <div class="card-header">
-            <h3>Staff List</h3>
-        </div>
-        <div class="card-body">
-            <?php if (empty($staffList)): ?>
-                <p style="text-align:center; color:#777;">No staff added yet.</p>
-            <?php else: ?>
-                <table width="100%">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Role</th>
-                            <th>Services</th>
-                            <th>Status</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-<?php foreach ($staffList as $s): ?>
-<tr>
-    <td><strong><?= htmlspecialchars($s['full_name']) ?></strong></td>
-
-    <td><?= htmlspecialchars($s['role'] ?? '-') ?></td>
-    <td>
-<span style="background:#eee;padding:4px 8px;border-radius:8px;">
-<?= htmlspecialchars($s['services'] ?? '-') ?>
-</span>
-</td>
-
-    <td>
-        <?= !empty($s['is_active']) && ($s['is_active'] === true || $s['is_active'] === 't' || $s['is_active'] == 1) ? 'Active' : 'Inactive' ?>
-    </td>
-
-    <td>
-        <form method="POST" onsubmit="return confirm('Delete this staff member?');">
-            <input type="hidden" name="delete_staff" value="1">
-            <input type="hidden" name="staff_id" value="<?= (int)$s['id'] ?>">
-
-            <button type="submit" class="btn btn-danger" style="padding:5px 10px;">
-                <i class="fas fa-trash"></i>
-            </button>
-        </form>
-    </td>
-</tr>
-<?php endforeach; ?>
-</tbody>
-                </table>
-            <?php endif; ?>
-        </div>
+<div class="card">
+    <div class="card-header">
+        <h3>Staff List</h3>
     </div>
+    <div class="card-body">
+        <?php if (empty($staffList)): ?>
+            <p style="text-align:center; color:#777;">No staff added yet.</p>
+        <?php else: ?>
+            <?php foreach ($staffList as $s): ?>
+                <?php
+                    $sid = (int)$s['id'];
+
+                    $assignedServiceIdsStmt = $pdo->prepare("
+                        SELECT product_id
+                        FROM staff_services
+                        WHERE staff_id = ?
+                    ");
+                    $assignedServiceIdsStmt->execute([$sid]);
+                    $assignedServiceIds = $assignedServiceIdsStmt->fetchAll(PDO::FETCH_COLUMN);
+                ?>
+
+                <div style="border:1px solid #eee; border-radius:10px; padding:15px; margin-bottom:15px; background:#fff;">
+                    <form method="POST" style="display:grid; grid-template-columns: 1.2fr 1fr 1.4fr auto auto; gap:10px; align-items:center;">
+                        <input type="hidden" name="staff_id" value="<?= $sid ?>">
+
+                        <div>
+                            <label style="font-size:12px; color:#777;">Full Name</label>
+                            <input type="text"
+                                   name="staff_full_name"
+                                   value="<?= htmlspecialchars($s['full_name']) ?>"
+                                   class="form-control"
+                                   required>
+                        </div>
+
+                        <div>
+                            <label style="font-size:12px; color:#777;">Role</label>
+                            <input type="text"
+                                   name="staff_role"
+                                   value="<?= htmlspecialchars($s['role'] ?? '') ?>"
+                                   class="form-control"
+                                   placeholder="Role">
+                        </div>
+
+                        <div>
+                            <label style="font-size:12px; color:#777;">Services</label>
+                            <select name="staff_services[]" multiple class="form-control" style="height:90px;">
+                                <?php foreach ($bookableServices as $srv): ?>
+                                    <option value="<?= (int)$srv['id'] ?>"
+                                        <?= in_array($srv['id'], $assignedServiceIds) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($srv['name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small style="color:#777;">Ctrl / Command ile çoklu seçim.</small>
+                        </div>
+
+                        <div>
+                            <label style="font-size:12px; color:#777;">Status</label><br>
+                            <?= !empty($s['is_active']) && ($s['is_active'] === true || $s['is_active'] === 't' || $s['is_active'] == 1) ? 'Active' : 'Inactive' ?>
+                        </div>
+
+                        <div style="display:flex; gap:8px; align-items:end;">
+                            <button type="submit" name="update_staff" value="1" class="btn btn-success">
+                                <i class="fas fa-save"></i>
+                            </button>
+
+                            <button type="submit"
+                                    name="delete_staff"
+                                    value="1"
+                                    class="btn btn-danger"
+                                    onclick="return confirm('Delete this staff member?');">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+</div>
     <div class="card" style="margin-top:20px;">
     <div class="card-header">
         <h3>Staff Working Hours</h3>
